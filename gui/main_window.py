@@ -291,6 +291,8 @@ class MainWindow(QMainWindow):
                 self._add_row(rec)
             else:
                 self._refresh_row(rec)
+                # a sync can clear the monitor flag (media full / dead)
+                self._sync_ui_flags(key)
 
     def remove_selected(self) -> None:
         for key in self._selected_keys():
