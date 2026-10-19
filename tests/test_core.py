@@ -152,11 +152,15 @@ class FakeAdapter(BoardAdapter):
 class FakeClient:
     """Serves a scripted sequence of thread states."""
 
-    def __init__(self, states, not_modified_when_same=True):
+    def __init__(self, states, not_modified_when_same=True, limit=None):
         self.states = list(states)
         self.calls = 0
         self.downloads: list[str] = []
         self.not_modified_when_same = not_modified_when_same
+        self._limit = limit
+
+    def image_limit(self, board):
+        return self._limit
 
     def fetch_thread(self, board, no, last_modified=None):
         state = self.states[min(self.calls, len(self.states) - 1)]
@@ -326,6 +330,79 @@ class TestEngineIncremental(unittest.TestCase):
         self.assertTrue((original / "a.png").exists())
         self.assertFalse((Path(self.settings.root) / "1").exists())
         self.assertEqual(engine.store.get_thread("news", 1)["folder"], str(original))
+
+
+class TestMediaLimit(unittest.TestCase):
+    """A media-full thread with comments off has nothing left to watch."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.settings = Settings(root=str(root / "dl"), board_dir=True,
+                                 folder_mode="both", name_mode="uploader")
+        self.settings.normalize()
+        self.store = Store(root / "state.sqlite")
+        self.adapter = FakeAdapter()
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    @staticmethod
+    def thread(files: int) -> list[dict]:
+        posts = [post(1, tim=1000, fname="op")]
+        posts += [post(n, resto=1, tim=1000 + n, fname=f"f{n}")
+                  for n in range(2, files + 1)]
+        return posts
+
+    def run_sync(self, files: int, *, limit, comments=False, monitor=True):
+        # start clean so a second call in the same test isn't a 304 no-op
+        self.store.remove_thread("news", 1)
+        client = FakeClient([(self.thread(files), "LM1")], limit=limit)
+        engine = Engine(self.settings, self.store, self.adapter, client)
+        engine.add("news/1", monitor=monitor, comments=comments)
+        return self.store.get_thread("news", 1)
+
+    def test_stops_when_full_and_comments_off(self):
+        rec = self.run_sync(4, limit=3)
+        self.assertEqual(rec["monitor"], 0)
+        self.assertEqual(rec["status"], "full")
+
+    def test_keeps_monitoring_when_comments_on(self):
+        rec = self.run_sync(4, limit=3, comments=True)
+        self.assertEqual(rec["monitor"], 1)
+        self.assertEqual(rec["status"], "ok")
+
+    def test_still_monitors_below_the_limit(self):
+        rec = self.run_sync(3, limit=3)
+        self.assertEqual(rec["monitor"], 1)
+        self.assertEqual(rec["status"], "ok")
+
+    def test_boundary_is_limit_plus_one(self):
+        # 4chan doesn't count the OP's file, so a 150-cap board is full at 151.
+        self.assertEqual(self.run_sync(150, limit=150)["monitor"], 1)
+        self.assertEqual(self.run_sync(151, limit=150)["monitor"], 0)
+
+    def test_unknown_limit_never_stops_monitoring(self):
+        rec = self.run_sync(50, limit=None)
+        self.assertEqual(rec["monitor"], 1)
+        self.assertEqual(rec["status"], "ok")
+
+
+class TestBoardLimits(unittest.TestCase):
+    def test_parse_board_limits(self):
+        payload = {"boards": [
+            {"board": "g", "image_limit": 150},
+            {"board": "v", "image_limit": 300},
+            {"board": "x"},                       # no limit reported
+            {"board": "y", "image_limit": 0},
+        ]}
+        self.assertEqual(BoardAdapter.parse_board_limits(payload),
+                         {"g": 150, "v": 300})
+
+    def test_parse_junk(self):
+        self.assertEqual(BoardAdapter.parse_board_limits({}), {})
+        self.assertEqual(BoardAdapter.parse_board_limits(None), {})
 
 
 class TestConfig(unittest.TestCase):

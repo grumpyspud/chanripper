@@ -75,6 +75,18 @@ class ThreadFetch:
 
 class BoardAdapter:
     site = "?"
+    #: Where the board list (and therefore each board's media cap) lives.
+    boards_url: str | None = None
+
+    @staticmethod
+    def parse_board_limits(payload: dict) -> dict[str, int]:
+        """`board -> image_limit` out of a /boards.json payload."""
+        out: dict[str, int] = {}
+        for b in (payload or {}).get("boards", []):
+            limit = b.get("image_limit")
+            if b.get("board") and isinstance(limit, int) and limit > 0:
+                out[str(b["board"]).lower()] = limit
+        return out
 
     def thread_url(self, board: str, no: int) -> str:
         raise NotImplementedError
@@ -91,6 +103,7 @@ class Chan4(BoardAdapter):
     API = "https://a.4cdn.org"
     CDN = "https://i.4cdn.org"
     WWW = "https://boards.4chan.org"
+    boards_url = f"{API}/boards.json"
 
     def thread_url(self, board: str, no: int) -> str:
         return f"{self.WWW}/{board}/thread/{no}/"
@@ -119,6 +132,34 @@ class Client:
         self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": UA, "Accept": "*/*"})
+        # board -> image_limit, fetched once from /boards.json. Caps differ per
+        # board (150 on /g/, 300 on /v/ and /a/), so this can't be a constant.
+        self._board_limits: dict[str, int] | None = None
+        self._limits_lock = threading.Lock()
+
+    def image_limit(self, board: str) -> int | None:
+        """4chan's attachment cap for `board`, or None if it can't be learned.
+
+        Failure is not cached: the next sync tries again, so one bad request at
+        startup doesn't disable the media-full check for the process lifetime.
+        """
+        board = (board or "").lower()
+        with self._limits_lock:
+            if self._board_limits is None:
+                url = getattr(self.adapter, "boards_url", None)
+                if not url:
+                    return None
+                try:
+                    r = self._get(url)
+                except requests.RequestException:
+                    return None
+                if r.status_code != 200:
+                    return None
+                try:
+                    self._board_limits = self.adapter.parse_board_limits(r.json())
+                except ValueError:
+                    return None
+            return self._board_limits.get(board)
 
     def _get(self, url: str, headers: dict | None = None, stream: bool = False,
              limiter: RateLimiter | None = None):

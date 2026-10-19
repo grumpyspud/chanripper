@@ -44,6 +44,16 @@ class Engine:
         if limiter is not None:
             limiter.interval = settings.request_interval
 
+    def _media_limit(self, board: str) -> int | None:
+        """4chan's per-board attachment cap, or None if it can't be learned."""
+        lookup = getattr(self.client, "image_limit", None)
+        if not callable(lookup):
+            return None
+        try:
+            return lookup(board)
+        except Exception:                 # never let a lookup break a sync
+            return None
+
     def thread_dir(self, board: str, no: int, subject: str = "",
                    semantic_url: str = "") -> Path:
         s = self.settings
@@ -165,6 +175,15 @@ class Engine:
                                      self.adapter.thread_url(board, no))
 
         media_rows = [p for p in posts if p.get("tim")]
+
+        # A thread stops accepting new attachments at its board's image_limit.
+        # 4chan does not count the OP's own file against that limit, so a
+        # thread is genuinely full once it holds limit+1 files. If we are not
+        # following the text replies there is nothing left to watch: polling it
+        # forever just burns checks and rate budget.
+        limit = self._media_limit(board)
+        full = (limit is not None and not rec.get("comments")
+                and len(media_rows) > limit)
         self.store.update_thread(
             board, no,
             subject=op.get("sub", "") or "",
@@ -175,7 +194,12 @@ class Engine:
             post_count=len(posts),
             media_count=len(media_rows),
             media_bytes=sum(p.get("fsize") or 0 for p in media_rows),
-            status="ok", error="")
+            status="full" if full else "ok", error="",
+            **({"monitor": 0} if full else {}))
+        if full:
+            result.messages.append(
+                f"media full ({len(media_rows)} files, limit {limit}+1) — "
+                "monitoring stopped")
 
         result.status = "ok"
         return result
