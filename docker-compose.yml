@@ -1,0 +1,29 @@
+services:
+  chanripper:
+    image: ghcr.io/grumpyspud/chanripper:latest
+    # To build it yourself instead of pulling:
+    # build: .
+    container_name: chanripper
+    restart: unless-stopped
+    ports:
+      - "4848:4848"
+    environment:
+      # Match these to the owner of your NAS share, or files land as root and
+      # you will not be able to move or delete them from Windows.
+      PUID: 1000
+      PGID: 1000
+      TZ: America/Chicago
+      CHANRIPPER_PORT: 4848
+    volumes:
+      # Settings + the dedupe ledger. Keep this on LOCAL storage (a NAS volume
+      # or a named docker volume) — SQLite over an SMB/CIFS mount corrupts
+      # under concurrent locking.
+      - ./config:/config
+      # Where the media actually goes. This is the one that should be the share.
+      - /volume1/4chan:/downloads
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4848/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

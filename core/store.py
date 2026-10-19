@@ -111,9 +111,10 @@ class Store:
 
     def remove_thread(self, board: str, no: int) -> None:
         with self._lock:
-            for t in ("threads", "posts", "media"):
-                self._db.execute(f"DELETE FROM {t} WHERE board=? AND no=?",
-                                 (board, no))
+            # NB: threads keys on `no`, but posts/media key on `thread`.
+            self._db.execute("DELETE FROM threads WHERE board=? AND no=?", (board, no))
+            self._db.execute("DELETE FROM posts WHERE board=? AND thread=?", (board, no))
+            self._db.execute("DELETE FROM media WHERE board=? AND thread=?", (board, no))
             self._db.commit()
 
     # ---- posts -------------------------------------------------------------

@@ -1,16 +1,17 @@
 [project]
 name = "chanripper"
 version = "0.1.0"
-description = "4chan thread downloader and monitor with a GUI"
+description = "4chan thread downloader and monitor with a desktop GUI and a web UI"
 requires-python = ">=3.10"
 dependencies = [
     "requests>=2.31",
-    "PySide6>=6.6",
 ]
 
 [project.optional-dependencies]
+desktop = ["PySide6>=6.6"]
+web = ["fastapi>=0.110", "uvicorn>=0.27"]
 build = ["pyinstaller>=6.0"]
-dev = ["pytest>=8.0"]
+dev = ["httpx>=0.27", "PySide6>=6.6", "fastapi>=0.110", "uvicorn>=0.27"]
 
 [project.scripts]
 chanripper = "cli:main"
@@ -20,7 +21,6 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["core", "gui"]
+packages = ["core", "gui", "web"]
 
-[tool.pyinstaller]
-# see chanripper.spec for the frozen build configuration
+# The frozen desktop build is configured in chanripper.spec.

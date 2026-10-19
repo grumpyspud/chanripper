@@ -1,10 +1,13 @@
 # ChanRipper
 
-A 4chan thread downloader and monitor for Windows, with a real GUI.
+A 4chan thread downloader and monitor — as a Windows desktop app and as a
+Docker container with a web UI.
 
 Paste a thread URL, hit **Download Thread**, and it pulls every media file in the
 thread. Tick **Monitor** and it keeps checking in the background, grabbing only
 what appeared since the last pass. Tick **Comments** and it also saves the posts.
+
+Both front ends sit on the same headless engine, so they behave identically.
 
 ## What it does
 
@@ -16,8 +19,10 @@ what appeared since the last pass. Tick **Comments** and it also saves the posts
   post they answer, greentext and `>>` references preserved).
 - **Always-visible thread list** — board, subject, post/media counts, size, last
   check, next check, editable delay, monitor/comments toggles, status.
+- **File browser** (web UI) — browse what has been downloaded, with inline image
+  thumbnails, plus a one-click zip of a whole archived thread.
 - **Persistent** — the list and every thread's state survive a restart, and
-  monitoring resumes automatically on launch.
+  monitoring resumes automatically on startup.
 - **Dead-thread detection** — a 404 marks the thread DEAD and stops monitoring it.
 
 ## How it keeps 4chan happy
@@ -35,7 +40,7 @@ what appeared since the last pass. Tick **Comments** and it also saves the posts
 Folder layout (root → site → board → thread):
 
 ```
-%USERPROFILE%\Downloads\4chan\4chan\news\1543881 - air-force-commando-dies-after-falling-from\
+Downloads\4chan\4chan\news\1543881 - air-force-commando-dies-after-falling-from\
     file.png                       <- uploader's filename
     file (1792348901932343).png    <- second upload also called "file.png"
     thread.json
@@ -50,12 +55,13 @@ Folder layout (root → site → board → thread):
   appended — `file (1792348901932343).png`. A third gets `(… ) (2)`.
 - All names are sanitized for Windows (illegal characters, reserved device
   names, trailing dots/spaces).
+- A thread's folder is **sticky once created**: changing the naming settings
+  affects new threads, and never relocates a thread that already has files.
 
-## Running it
+## The desktop app
 
 ### The .exe (no Python needed)
-Grab `ChanRipper.exe` from the GitHub Actions build artifact or the releases
-page. It is a single self-contained file.
+Grab `ChanRipper.exe` from the releases page. It is a single self-contained file.
 
 ### From source
 ```bash
@@ -65,7 +71,53 @@ pip install requests "PySide6>=6.6"
 python main.py
 ```
 
-### Command line (the engine, no GUI)
+### Building the exe yourself
+```bash
+pip install pyinstaller
+pyinstaller --clean --noconfirm chanripper.spec
+```
+
+## The container (NAS / always-on host)
+
+```bash
+docker compose up -d
+```
+
+Then open `http://<host>:4848`.
+
+`docker-compose.yml` mounts two volumes, and the split between them matters:
+
+| Mount | Holds | Where it should live |
+| --- | --- | --- |
+| `/config` | `config.json` + `state.sqlite` — settings, thread list, dedupe ledger | **Local storage** (a NAS volume or a named Docker volume). SQLite over an SMB/CIFS mount corrupts under concurrent locking. |
+| `/downloads` | the media itself | The share you actually want the files on. |
+
+Updating is `docker compose pull && docker compose up -d` — both volumes stay
+put, so settings, the thread list and the ledger all survive.
+
+### Environment
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PUID` / `PGID` | `1000` | The uid/gid downloaded files are written as. **Set these to the owner of your share**, or files land as root and you cannot move or delete them from Windows. |
+| `TZ` | `UTC` | Timestamps shown in the UI. |
+| `CHANRIPPER_PORT` | `4848` | Port inside the container. |
+| `CHANRIPPER_CONFIG_DIR` | `/config` | Where `config.json` and `state.sqlite` live. |
+| `CHANRIPPER_DOWNLOAD_DIR` | `/downloads` | Default download root. |
+
+The image is built for **linux/amd64 and linux/arm64**, so it runs on x86 NAS
+boxes and ARM ones alike. There is no authentication — it assumes a trusted LAN,
+so do not port-forward it to the internet.
+
+### Building the image yourself
+```bash
+docker build -t chanripper .
+docker run -d -p 4848:4848 -e PUID=1000 -e PGID=1000 \
+  -v ./config:/config -v /your/share/4chan:/downloads chanripper
+```
+
+## Command line (the engine, no front end)
+
 ```bash
 python cli.py download "https://boards.4chan.org/news/thread/1543881/" --comments
 python cli.py download news/1543881 --monitor --interval 10
@@ -73,23 +125,17 @@ python cli.py watch --interval 10
 python cli.py list
 ```
 
-### Building the exe yourself
-```bash
-pip install pyinstaller
-pyinstaller --clean --noconfirm chanripper.spec
-```
-
 ## Where state lives
 
-| File | Contents |
+| Context | Path |
 | --- | --- |
-| `%APPDATA%\ChanRipper\config.json` | Your settings |
-| `%APPDATA%\ChanRipper\state.sqlite` | Thread list, per-thread state, media ledger |
+| Desktop | `%APPDATA%\ChanRipper\config.json` and `state.sqlite` |
+| Container | `/config/config.json` and `/config/state.sqlite` (the mounted volume) |
 
 ## Layout
 
 ```
-core/        headless engine — no GUI imports, fully unit-tested
+core/        headless engine — no GUI or web imports, fully unit-tested
   api.py         board adapters, URL parsing, rate limiters, HTTP client
   parser.py      4chan comment HTML -> plain text
   naming.py      Windows-safe names and collision rules
@@ -98,8 +144,12 @@ core/        headless engine — no GUI imports, fully unit-tested
   engine.py      download + incremental sync
   scheduler.py   monitor loop
   config.py      settings
-gui/         PySide6 window and settings dialog
+gui/         PySide6 desktop window and settings dialog
+web/         FastAPI + a single static page (no build step)
+  app.py         REST API, SSE event stream, file browser, zip
+  static/        index.html, app.js, style.css
 cli.py       headless entry point
+webmain.py   container entry point
 tests/       unit tests (no network) + a headless GUI smoke test
 ```
 
@@ -109,6 +159,6 @@ today, so another imageboard can be added without touching the engine.
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v            # 32 unit tests, no network
+python -m unittest discover -s tests -v              # 57 tests, no network
 QT_QPA_PLATFORM=offscreen python tests/gui_smoke.py  # builds the window, does a real download
 ```

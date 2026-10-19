@@ -343,8 +343,7 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self.settings = dlg.result_settings()
             self.settings.save()
-            self.engine.settings = self.settings
-            self.engine.client.limiter.interval = self.settings.request_interval
+            self.engine.apply_settings(self.settings)
             self._reload_table()
 
     def _context_menu(self, pos) -> None:

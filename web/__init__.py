@@ -1,0 +1,1 @@
+"""ChanRipper web package."""

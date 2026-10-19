@@ -284,6 +284,49 @@ class TestEngineIncremental(unittest.TestCase):
         folder = Path(self.settings.root) / "4chan" / "news" / "1"
         self.assertTrue((folder / "111.webm").exists())
 
+    def test_remove_thread_clears_all_three_tables(self):
+        # regression: posts/media key on `thread`, threads keys on `no`
+        posts = [post(1, tim=111, fname="a"), post(2, resto=1, tim=222, fname="b")]
+        engine, client = self.make([(posts, "LM1")])
+        engine.add("news/1", comments=True)
+        self.assertIsNotNone(self.store.get_thread("news", 1))
+        self.assertTrue(self.store.known_media("news", 1))
+        self.assertTrue(self.store.known_posts("news", 1))
+
+        self.store.remove_thread("news", 1)
+
+        self.assertIsNone(self.store.get_thread("news", 1))
+        self.assertEqual(self.store.known_media("news", 1), set())
+        self.assertEqual(self.store.known_posts("news", 1), set())
+
+    def test_removed_thread_can_be_re_added(self):
+        posts = [post(1, tim=111, fname="a")]
+        engine, client = self.make([(posts, "LM1"), (posts, "LM2")])
+        engine.add("news/1")
+        self.store.remove_thread("news", 1)
+        res = engine.add("news/1")
+        self.assertEqual(res.status, "ok")
+        self.assertEqual(res.new_media, 1)
+
+    def test_folder_is_sticky_when_naming_settings_change(self):
+        # regression: flipping folder_mode must not relocate a thread and
+        # orphan the files already downloaded into its original folder.
+        posts = [post(1, tim=111, fname="a")]
+        engine, client = self.make([(posts, "LM1"), (posts, "LM2")])
+        engine.add("news/1")
+        original = Path(self.settings.root) / "4chan" / "news" / "1"
+        self.assertTrue((original / "a.png").exists())
+
+        self.settings.folder_mode = "number"
+        self.settings.board_dir = False
+        engine.apply_settings(self.settings)
+        res = engine.sync("news", 1, force=True)
+
+        self.assertEqual(Path(res.folder), original)
+        self.assertTrue((original / "a.png").exists())
+        self.assertFalse((Path(self.settings.root) / "1").exists())
+        self.assertEqual(engine.store.get_thread("news", 1)["folder"], str(original))
+
 
 class TestConfig(unittest.TestCase):
     def test_delay_floor(self):

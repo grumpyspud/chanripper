@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChanRipper</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header>
+  <h1>ChanRipper</h1>
+  <span id="version" class="muted"></span>
+  <span id="conn" class="pill pill-warn">connecting…</span>
+  <span id="summary" class="muted"></span>
+</header>
+
+<section class="addbar">
+  <input id="url" type="text" placeholder="Paste a thread URL — https://boards.4chan.org/news/thread/1543881/…  (or news/1543881)">
+  <label class="chk"><input id="monitor" type="checkbox"> Monitor</label>
+  <label class="chk"><input id="comments" type="checkbox"> Comments</label>
+  <button id="add" class="primary">Download Thread</button>
+</section>
+
+<section class="toolbar">
+  <button id="startAll">Start all</button>
+  <button id="stopAll">Stop all</button>
+  <button id="refresh">Refresh</button>
+  <button id="openSettings">Settings</button>
+  <span class="spacer"></span>
+  <span id="busy" class="muted"></span>
+</section>
+
+<table id="threads">
+  <thead>
+    <tr>
+      <th>Board</th><th>Thread</th><th>Subject</th><th>Posts</th><th>Media</th>
+      <th>Size</th><th>Last check</th><th>Next</th><th>Delay (s)</th>
+      <th>Mon</th><th>Com</th><th>Status</th><th></th>
+    </tr>
+  </thead>
+  <tbody id="rows"></tbody>
+</table>
+<p id="empty" class="muted empty">No threads yet — paste a URL above.</p>
+
+<aside id="settings" class="drawer">
+  <div class="drawer-head">
+    <h2>Settings</h2>
+    <button class="x" data-close="settings">✕</button>
+  </div>
+  <div class="drawer-body">
+    <label>Default root folder
+      <input id="s-root" type="text">
+    </label>
+    <label class="chk"><input id="s-board_dir" type="checkbox"> Create a directory for each message board</label>
+    <label>Thread folder is named
+      <select id="s-folder_mode">
+        <option value="number">Thread number</option>
+        <option value="name">Thread name</option>
+        <option value="both">Number and name</option>
+      </select>
+    </label>
+    <label>Media files are saved as
+      <select id="s-name_mode">
+        <option value="uploader">Uploader's filename</option>
+        <option value="number">4chan file number</option>
+      </select>
+    </label>
+    <label>Default delay between checks (seconds)
+      <input id="s-default_delay" type="number" min="2" step="1">
+    </label>
+    <p id="s-delay-note" class="warn"></p>
+    <label class="chk"><input id="s-default_comments" type="checkbox"> Download comments by default for new threads</label>
+    <label>Simultaneous threads checked
+      <input id="s-max_workers" type="number" min="1" max="8">
+    </label>
+    <label>Parallel media downloads
+      <input id="s-media_workers" type="number" min="1" max="16">
+    </label>
+    <label>Minimum gap between API requests (seconds)
+      <input id="s-request_interval" type="number" min="0.5" step="0.5">
+    </label>
+    <p class="muted small">4chan asks for no more than one API request per second. Media comes from Cloudflare and is not subject to that limit.</p>
+    <button id="saveSettings" class="primary">Save settings</button>
+  </div>
+</aside>
+
+<aside id="browser" class="drawer">
+  <div class="drawer-head">
+    <h2 id="browser-title">Files</h2>
+    <button class="x" data-close="browser">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="crumbs" id="crumbs"></div>
+    <div id="files" class="files"></div>
+  </div>
+</aside>
+
+<div id="scrim" class="scrim"></div>
+<div id="toast" class="toast"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

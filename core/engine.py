@@ -37,6 +37,13 @@ class Engine:
                                        interval=settings.request_interval)
 
     # -- helpers -------------------------------------------------------------
+    def apply_settings(self, settings: Settings) -> None:
+        """Swap in new settings and propagate what the client caches."""
+        self.settings = settings
+        limiter = getattr(self.client, "limiter", None)
+        if limiter is not None:
+            limiter.interval = settings.request_interval
+
     def thread_dir(self, board: str, no: int, subject: str = "",
                    semantic_url: str = "") -> Path:
         s = self.settings
@@ -93,8 +100,15 @@ class Engine:
             return result
 
         op = posts[0]
-        folder = self.thread_dir(board, no, op.get("sub", ""),
-                                 op.get("semantic_url", ""))
+        # A thread's folder is sticky once created: changing the naming
+        # settings must not relocate a thread and orphan the files already in
+        # it. New threads pick up whatever the current settings say.
+        existing = rec.get("folder")
+        if existing and Path(existing).is_dir():
+            folder = Path(existing)
+        else:
+            folder = self.thread_dir(board, no, op.get("sub", ""),
+                                     op.get("semantic_url", ""))
         folder.mkdir(parents=True, exist_ok=True)
         result.folder = folder
 

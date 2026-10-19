@@ -23,10 +23,18 @@ def _home() -> Path:
 
 
 def default_root() -> str:
+    override = os.environ.get("CHANRIPPER_DOWNLOAD_DIR")
+    if override:
+        return override
     return str(_home() / "Downloads" / SITE_DIR)
 
 
 def config_dir() -> Path:
+    # Containers (and portable installs) point this at a mounted volume so
+    # settings and the ledger survive an image update.
+    override = os.environ.get("CHANRIPPER_CONFIG_DIR")
+    if override:
+        return Path(override)
     base = os.environ.get("APPDATA")
     if base:
         return Path(base) / APP_NAME
