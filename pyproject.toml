@@ -1,6 +1,6 @@
 [project]
 name = "chanripper"
-version = "0.1.0"
+version = "0.1.1"
 description = "4chan thread downloader and monitor with a desktop GUI and a web UI"
 requires-python = ">=3.10"
 dependencies = [
