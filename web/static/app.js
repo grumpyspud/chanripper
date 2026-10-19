@@ -52,6 +52,7 @@ function statusCell(t) {
   switch (t.status) {
     case 'ok':
     case 'unchanged': return ['up to date', 'st-ok'];
+    case 'full': return ['media full', 'st-ok'];
     case 'dead': return ['DEAD (404)', 'st-bad'];
     case 'error': return ['error: ' + (t.error || '').slice(0, 40), 'st-bad'];
     default: return [t.status || 'idle', 'st-wait'];
@@ -242,7 +243,14 @@ function closeDrawers() {
 }
 $('openSettings').onclick = () => openDrawer('settings');
 $('scrim').onclick = closeDrawers;
-document.querySelectorAll('[data-close]').forEach((b) => { b.onclick = closeDrawers; });
+document.querySelectorAll('[data-close]').forEach((b) => {
+  b.onclick = () => (b.dataset.close === 'browser' ? closeBrowser() : closeDrawers());
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!$('browser').classList.contains('hidden')) closeBrowser();
+  else closeDrawers();
+});
 
 /* ---------------- settings ---------------- */
 
@@ -294,10 +302,22 @@ $('saveSettings').onclick = async () => {
 /* ---------------- file browser ---------------- */
 
 let BROWSER_PATH = '';
+const MARKED = new Set();     // paths marked for deletion in the current folder
+
+function openBrowserPage() {
+  closeDrawers();
+  $('browser').classList.remove('hidden');
+}
+
+function closeBrowser() {
+  $('browser').classList.add('hidden');
+  MARKED.clear();
+  syncMarkUI();
+}
 
 async function openBrowser(board, no) {
   $('browser-title').textContent = `/${board}/${no}/`;
-  openDrawer('browser');
+  openBrowserPage();
   const t = STATE.threads.find((x) => x.board === board && String(x.no) === no);
   let path = '';
   if (t && t.folder && STATE.settings.root && t.folder.startsWith(STATE.settings.root)) {
@@ -310,9 +330,24 @@ async function browse(path) {
   try {
     const data = await api('/api/files?path=' + encodeURIComponent(path || ''));
     BROWSER_PATH = data.path || '';
+    MARKED.clear();               // marks never outlive the folder you made them in
     renderCrumbs(data.path, data.parent);
     renderFiles(data.entries);
   } catch (e) { toast('Failed: ' + e.message, true); }
+}
+
+function syncMarkUI() {
+  const n = MARKED.size;
+  const btn = $('delMarked');
+  btn.disabled = n === 0;
+  btn.textContent = n ? `Delete marked files (${n})` : 'Delete marked files';
+  $('selcount').textContent = n ? `${n} marked` : '';
+}
+
+function toggleMark(path, on, card) {
+  if (on) MARKED.add(path); else MARKED.delete(path);
+  if (card) card.classList.toggle('marked', on);
+  syncMarkUI();
 }
 
 function renderCrumbs(path, parent) {
@@ -333,13 +368,22 @@ function renderCrumbs(path, parent) {
 }
 
 function renderFiles(entries) {
-  if (!entries.length) { $('files').innerHTML = '<p class="muted small">empty</p>'; return; }
+  if (!entries.length) {
+    $('files').innerHTML = '<p class="muted small">empty</p>';
+    syncMarkUI();
+    return;
+  }
   $('files').innerHTML = entries.map((f) => {
     const raw = '/api/files/raw?path=' + encodeURIComponent(f.path);
     let thumb = `<span>${esc(f.kind)}</span>`;
     if (f.kind === 'image') thumb = `<img loading="lazy" src="${esc(raw)}" alt="">`;
     const click = f.dir ? `data-dir="${esc(f.path)}"` : `data-open="${esc(raw)}"`;
-    return `<div class="file ${f.dir ? 'dir' : ''}" ${click}>
+    const marked = !f.dir && MARKED.has(f.path);
+    const pick = f.dir ? '' :
+      `<input type="checkbox" class="pick" data-pick="${esc(f.path)}"` +
+      ` title="Mark for deletion"${marked ? ' checked' : ''}>`;
+    return `<div class="file ${f.dir ? 'dir' : ''}${marked ? ' marked' : ''}" ${click}>
+      ${pick}
       <div class="thumb">${thumb}</div>
       <div class="meta">
         <span class="name">${esc(f.name)}</span>
@@ -347,13 +391,52 @@ function renderFiles(entries) {
       </div>
     </div>`;
   }).join('');
+  $('files').querySelectorAll('[data-pick]').forEach((el) => {
+    el.onclick = (e) => {
+      e.stopPropagation();          // don't open the file when ticking the box
+      toggleMark(el.dataset.pick, el.checked, el.closest('.file'));
+    };
+  });
   $('files').querySelectorAll('[data-dir]').forEach((el) => {
     el.onclick = () => browse(el.dataset.dir);
   });
   $('files').querySelectorAll('[data-open]').forEach((el) => {
     el.onclick = () => window.open(el.dataset.open, '_blank');
   });
+  syncMarkUI();
 }
+
+$('markAll').onclick = () => {
+  const boxes = [...document.querySelectorAll('#files [data-pick]')];
+  if (!boxes.length) return;
+  const all = boxes.every((b) => b.checked);
+  boxes.forEach((b) => {
+    b.checked = !all;
+    toggleMark(b.dataset.pick, !all, b.closest('.file'));
+  });
+};
+
+$('delMarked').onclick = async () => {
+  const paths = [...MARKED];
+  if (!paths.length) return;
+  const noun = paths.length === 1 ? 'file' : 'files';
+  if (!confirm(`Delete ${paths.length} marked ${noun} from disk?\n\nThis cannot be undone.`)) return;
+  const btn = $('delMarked');
+  btn.disabled = true;
+  try {
+    const res = await api('/api/files/delete', {
+      method: 'POST', body: JSON.stringify({ paths }),
+    });
+    MARKED.clear();
+    await browse(BROWSER_PATH);
+    toast(`Deleted ${res.deleted.length} ${noun} (${human(res.bytes)})` +
+          (res.failed.length ? ` · ${res.failed.length} failed` : ''));
+    if (res.failed.length) console.warn('delete failures', res.failed);
+  } catch (e) {
+    toast('Delete failed: ' + e.message, true);
+    syncMarkUI();
+  }
+};
 
 /* ---------------- boot ---------------- */
 

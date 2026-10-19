@@ -80,6 +80,18 @@ td input[type=number]{width:64px; padding:4px 6px}
 .drawer-body label.chk{flex-direction:row; align-items:center; gap:7px}
 .x{background:none; border:none; color:var(--muted); font-size:15px; cursor:pointer}
 
+/* full-page files browser (replaces the old right-hand drawer) */
+.browserpage{position:fixed; inset:0; z-index:50; background:var(--bg);
+             display:flex; flex-direction:column}
+.browserpage.hidden{display:none}
+.browser-bar{display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+             padding:12px 18px; border-bottom:1px solid var(--line);
+             background:var(--panel)}
+.browserpage .files{padding:16px 18px; overflow:auto; flex:1; align-content:start;
+                    grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+button.danger:disabled{opacity:.45; cursor:default; border-color:var(--line); color:var(--muted)}
+button.danger:disabled:hover{background:var(--panel2)}
+
 .crumbs{display:flex; flex-wrap:wrap; gap:4px; font-size:12px; align-items:center}
 .crumbs a{color:var(--accent); cursor:pointer; text-decoration:none}
 .files{display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:10px}
@@ -98,6 +110,13 @@ td input[type=number]{width:64px; padding:4px 6px}
 .file .sz{color:var(--muted)}
 .file.dir{cursor:pointer}
 .file.dir:hover{border-color:var(--accent)}
+/* mark-for-deletion: the checkbox sits over the thumbnail, out of the way of
+   the click-to-open area but still a comfortable target */
+.file{position:relative}
+.file .pick{position:absolute; top:7px; left:7px; z-index:2; width:17px; height:17px;
+            accent-color:var(--bad); cursor:pointer}
+.file.marked{border-color:var(--bad); box-shadow:0 0 0 1px var(--bad) inset}
+.file.marked .thumb{opacity:.55}
 
 .toast{
   position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(20px);

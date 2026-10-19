@@ -85,16 +85,18 @@
   </div>
 </aside>
 
-<aside id="browser" class="drawer">
-  <div class="drawer-head">
+<section id="browser" class="browserpage hidden">
+  <div class="browser-bar">
     <h2 id="browser-title">Files</h2>
-    <button class="x" data-close="browser">✕</button>
-  </div>
-  <div class="drawer-body">
     <div class="crumbs" id="crumbs"></div>
-    <div id="files" class="files"></div>
+    <span class="spacer"></span>
+    <span id="selcount" class="muted small"></span>
+    <button id="markAll" class="mini">Mark all</button>
+    <button id="delMarked" class="danger" disabled>Delete marked files</button>
+    <button class="x" data-close="browser" title="Close (Esc)">✕</button>
   </div>
-</aside>
+  <div id="files" class="files"></div>
+</section>
 
 <div id="scrim" class="scrim"></div>
 <div id="toast" class="toast"></div>

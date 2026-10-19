@@ -191,6 +191,10 @@ class ThreadPatch(BaseModel):
     delay: float | None = None
 
 
+class DeleteFiles(BaseModel):
+    paths: list[str] = Field(default_factory=list)
+
+
 class SettingsPatch(BaseModel):
     root: str | None = None
     board_dir: bool | None = None
@@ -390,6 +394,44 @@ async def api_file_raw(path: str = Query(...), download: bool = False):
     return FileResponse(
         target, filename=target.name,
         content_disposition_type="attachment" if download else "inline")
+
+
+@app.post("/api/files/delete")
+async def delete_files(body: DeleteFiles) -> dict:
+    """Delete marked files from disk.
+
+    The media ledger is deliberately left alone: the monitor decides what to
+    download from it, so a deleted file is never fetched again on the next
+    check. The thread's media count therefore keeps describing the thread, not
+    what happens to still be on disk.
+    """
+    if not body.paths:
+        raise HTTPException(status_code=400, detail="no paths given")
+
+    deleted: list[str] = []
+    failed: list[dict[str, str]] = []
+    freed = 0
+    for rel in body.paths:
+        try:
+            target = safe_path(rel)
+        except HTTPException as exc:
+            failed.append({"path": rel, "error": str(exc.detail)})
+            continue
+        if not target.exists():
+            failed.append({"path": rel, "error": "no such file"})
+            continue
+        if target.is_dir():
+            failed.append({"path": rel, "error": "directories are not deletable"})
+            continue
+        try:
+            size = target.stat().st_size
+            target.unlink()
+        except OSError as exc:
+            failed.append({"path": rel, "error": str(exc)})
+            continue
+        deleted.append(rel)
+        freed += size
+    return {"deleted": deleted, "failed": failed, "bytes": freed}
 
 
 @app.get("/api/threads/{board}/{no}/zip")

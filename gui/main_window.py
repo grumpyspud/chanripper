@@ -22,6 +22,7 @@ from core.engine import Engine, SyncResult
 from core.scheduler import MonitorEngine
 from core.store import Store
 
+from .file_browser import FileBrowser
 from .settings_dialog import SettingsDialog
 
 COLUMNS = ["Board", "Thread", "Subject", "Posts", "Media", "Size",
@@ -130,6 +131,7 @@ class MainWindow(QMainWindow):
         for label, slot in (("Add", self.add_thread),
                             ("Remove", self.remove_selected),
                             ("Re-check now", self.recheck_selected),
+                            ("Browse files", self.browse_selected),
                             ("Open folder", self.open_selected_folder),
                             ("Start all", self.start_all),
                             ("Stop all", self.stop_all),
@@ -201,8 +203,8 @@ class MainWindow(QMainWindow):
     def _set_status(self, row: int, rec: dict) -> None:
         status = rec.get("status") or "idle"
         label = {"ok": "up to date", "unchanged": "up to date",
-                 "dead": "DEAD (404)", "error": "error", "idle": "idle",
-                 "downloading": "downloading…"}.get(status, status)
+                 "full": "media full", "dead": "DEAD (404)", "error": "error",
+                 "idle": "idle", "downloading": "downloading…"}.get(status, status)
         if status == "error" and rec.get("error"):
             label = f"error: {rec['error'][:40]}"
         item = self.table.item(row, C_STATUS)
@@ -315,6 +317,17 @@ class MainWindow(QMainWindow):
                 target=lambda b=board, n=no: self.bridge.sync_done.emit(
                     self.engine.sync(b, n, force=True)), daemon=True).start()
 
+    def browse_selected(self) -> None:
+        keys = self._selected_keys()
+        if not keys:
+            return
+        board, no = keys[0]
+        rec = self.store.get_thread(board, no)
+        if not rec or not rec.get("folder"):
+            return
+        FileBrowser(self.settings.root, start=rec["folder"],
+                    title=f"/{board}/{no}/", parent=self).exec()
+
     def open_selected_folder(self) -> None:
         for board, no in self._selected_keys():
             rec = self.store.get_thread(board, no)
@@ -323,6 +336,9 @@ class MainWindow(QMainWindow):
 
     def start_all(self) -> None:
         for rec in self.store.list_threads():
+            # A media-full thread with no comments has nothing left to watch.
+            if rec.get("status") == "full" and not rec.get("comments"):
+                continue
             self.store.update_thread(rec["board"], rec["no"], monitor=1)
             self._sync_ui_flags((rec["board"], rec["no"]))
         self._ensure_monitor()
@@ -352,6 +368,7 @@ class MainWindow(QMainWindow):
             return
         menu = QMenu(self)
         acts = {
+            "Browse files": self.browse_selected,
             "Open folder": self.open_selected_folder,
             "Re-check now": self.recheck_selected,
             "Copy thread URL": self._copy_url,

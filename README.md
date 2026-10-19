@@ -19,11 +19,19 @@ Both front ends sit on the same headless engine, so they behave identically.
   post they answer, greentext and `>>` references preserved).
 - **Always-visible thread list** — board, subject, post/media counts, size, last
   check, next check, editable delay, monitor/comments toggles, status.
-- **File browser** (web UI) — browse what has been downloaded, with inline image
-  thumbnails, plus a one-click zip of a whole archived thread.
+- **File browser** (both front ends) — a full-page browser over what has been
+  downloaded, with thumbnails, breadcrumbs, a **Mark all** / **Delete marked
+  files** pair for clearing unwanted media off the disk, plus a one-click zip of
+  a whole archived thread. Deleted files stay in the ledger, so a monitored
+  thread never re-downloads something you removed.
 - **Persistent** — the list and every thread's state survive a restart, and
   monitoring resumes automatically on startup.
 - **Dead-thread detection** — a 404 marks the thread DEAD and stops monitoring it.
+- **Media-full detection** — 4chan caps a thread's attachments per board
+  (`image_limit` in `boards.json`: 150 on `/g/`, 300 on `/v/` and `/a/`) and
+  does not count the OP's file, so a thread is full at limit+1 files. With
+  **Comments** unticked there is nothing left to watch, so monitoring stops and
+  the status reads `media full`. With comments on it keeps polling for replies.
 
 ## How it keeps 4chan happy
 
@@ -144,7 +152,7 @@ core/        headless engine — no GUI or web imports, fully unit-tested
   engine.py      download + incremental sync
   scheduler.py   monitor loop
   config.py      settings
-gui/         PySide6 desktop window and settings dialog
+gui/         PySide6 desktop window, settings dialog and file browser
 web/         FastAPI + a single static page (no build step)
   app.py         REST API, SSE event stream, file browser, zip
   static/        index.html, app.js, style.css
@@ -159,6 +167,6 @@ today, so another imageboard can be added without touching the engine.
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v              # 57 tests, no network
+python -m unittest discover -s tests -v              # 70 tests, no network
 QT_QPA_PLATFORM=offscreen python tests/gui_smoke.py  # builds the window, does a real download
 ```
