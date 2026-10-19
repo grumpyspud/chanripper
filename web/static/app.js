@@ -64,9 +64,11 @@ function renderRows() {
   $('empty').classList.toggle('hidden', threads.length > 0);
   rows.innerHTML = threads.map((t) => {
     const [label, cls] = statusCell(t);
+    // While a check is in flight there is no next-check time yet, so show the
+    // idle placeholder instead of "now": the STATUS column already says
+    // "checking…", and a wider word here resized the column on every tick.
     let next = '—';
-    if (t.checking) next = 'now';
-    else if (t.next_in != null) next = Math.max(0, Math.round(t.next_in)) + 's';
+    if (!t.checking && t.next_in != null) next = Math.max(0, Math.round(t.next_in)) + 's';
     return `<tr data-k="${esc(t.board)}|${t.no}">
       <td>/${esc(t.board)}/</td>
       <td class="num">${t.no}</td>
@@ -75,7 +77,7 @@ function renderRows() {
       <td class="num">${t.media_count || 0}</td>
       <td class="num">${human(t.media_bytes)}</td>
       <td class="num">${hhmmss(t.last_check)}</td>
-      <td class="num next" data-next="${t.checking ? 'now' : (t.next_in != null ? Math.max(0, Math.round(t.next_in)) : '')}">${next}</td>
+      <td class="num next" data-next="${!t.checking && t.next_in != null ? Math.max(0, Math.round(t.next_in)) : ''}">${next}</td>
       <td><input type="number" class="delay" min="2" step="1" value="${Math.round(t.delay || 10)}"></td>
       <td><input type="checkbox" class="mon" ${t.monitor ? 'checked' : ''}></td>
       <td><input type="checkbox" class="com" ${t.comments ? 'checked' : ''}></td>
@@ -367,7 +369,7 @@ setInterval(() => {
     const t = byKey[tr.dataset.k];
     const cell = tr.querySelector('.next');
     if (!t || !cell) return;
-    if (t.checking) { cell.textContent = 'checking…'; return; }
+    if (t.checking) { cell.textContent = '—'; return; }
     if (t.next_in != null) {
       t.next_in = Math.max(0, t.next_in - 1);
       cell.textContent = Math.round(t.next_in) + 's';

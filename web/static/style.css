@@ -53,6 +53,9 @@ th{color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase
 tbody tr:hover{background:rgba(255,255,255,.025)}
 td.subject{max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 td.num{text-align:right; font-variant-numeric:tabular-nums}
+/* Hold the NEXT column at a fixed width so a 1-2-3 digit countdown never
+   nudges the neighbouring columns/buttons around. */
+td.next{width:3.5em; min-width:3.5em; white-space:nowrap}
 .st-ok{color:var(--ok)}
 .st-bad{color:var(--bad)}
 .st-wait{color:var(--muted)}
