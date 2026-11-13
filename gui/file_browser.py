@@ -229,11 +229,13 @@ class FileBrowser(QDialog):
         self._render_crumbs()
         self._refresh_buttons()
 
-    def _grid_size(self, names: list[str]) -> QSize:
+    def _grid_size(self, names: list[str], metas: list[str]) -> QSize:
         fm = self.list.fontMetrics()
         max_w = self.thumb_size.width()
         for n in names:
             max_w = max(max_w, fm.horizontalAdvance(n))
+        for m in metas:
+            max_w = max(max_w, fm.horizontalAdvance(m))
         w = min(max_w + 24, 320)
         h = self.thumb_size.height() + 2 * fm.lineSpacing() + 16
         return QSize(w, h)
@@ -244,6 +246,7 @@ class FileBrowser(QDialog):
         self._pixmaps.clear()
         self.file_rels = []
         names: list[str] = []
+        metas: list[str] = []
         try:
             children = sorted(folder.iterdir(),
                               key=lambda p: (p.is_file(), p.name.lower()))
@@ -264,6 +267,7 @@ class FileBrowser(QDialog):
             date = format_ts(mtime, self.date_format)
             meta = (f"folder · {date}" if is_dir else f"{human(size)} · {date}") if date \
                 else ("folder" if is_dir else human(size))
+            metas.append(meta)
             label = f"{child.name}\n{meta}"
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, rel)
@@ -278,7 +282,7 @@ class FileBrowser(QDialog):
                     "double-click to preview")
                 item.setIcon(self._file_icon(rel, child, marked=False))
             self.list.addItem(item)
-        self.list.setGridSize(self._grid_size(names))
+        self.list.setGridSize(self._grid_size(names, metas))
         self.list.blockSignals(False)
 
     def _set_size(self, lvl: str) -> None:

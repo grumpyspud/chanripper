@@ -52,6 +52,13 @@ function formatDate(ts, format) {
   return `${y}-${mo}-${day} ${h24}:${mi}`;
 }
 
+function fileMeta(f, fmt) {
+  const date = f.mtime ? formatDate(f.mtime, fmt) : '';
+  return f.dir
+    ? ('folder' + (date ? ' · ' + date : ''))
+    : (human(f.size) + (date ? ' · ' + date : ''));
+}
+
 function toast(msg, bad) {
   const t = $('toast');
   t.textContent = msg;
@@ -425,9 +432,12 @@ function setPreviewSize(size) {
 // plus a fixed meta block, so every box is the same size.
 function applyGridSize(entries) {
   const th = PREVIEWS[PREVIEW_SIZE];
-  let maxName = 0;
-  (entries || []).forEach((f) => { maxName = Math.max(maxName, measureText(f.name)); });
-  const tileW = Math.round(Math.min(Math.max(maxName + 18, 96), 320));
+  const fmt = (STATE.settings && STATE.settings.date_format) || 'iso';
+  let maxW = 0;
+  (entries || []).forEach((f) => {
+    maxW = Math.max(maxW, measureText(f.name), measureText(fileMeta(f, fmt)));
+  });
+  const tileW = Math.round(Math.min(Math.max(maxW + 18, 96), 320));
   $('files').style.setProperty('--thumb', th + 'px');
   $('files').style.setProperty('--tile-w', tileW + 'px');
 }
@@ -495,10 +505,7 @@ function renderFiles(entries) {
     const pick = f.dir ? '' :
       `<input type="checkbox" class="pick" data-pick="${esc(f.path)}"` +
       ` title="Mark for deletion"${marked ? ' checked' : ''}>`;
-    const date = f.mtime ? formatDate(f.mtime, fmt) : '';
-    const meta = f.dir
-      ? ('folder' + (date ? ' · ' + date : ''))
-      : (human(f.size) + (date ? ' · ' + date : ''));
+    const meta = fileMeta(f, fmt);
     return `<div class="file ${f.dir ? 'dir' : ''}${marked ? ' marked' : ''}" data-path="${esc(f.path)}">
       ${pick}
       <div class="thumb">${thumb}</div>

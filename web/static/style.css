@@ -125,7 +125,7 @@ button.mini:disabled{opacity:.45; cursor:default}
             gap:3px; height:56px; box-sizing:border-box; flex:none}
 .file .name{word-break:break-all; line-height:1.25; overflow:hidden;
             display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical}
-.file .sz{color:var(--muted)}
+.file .sz{color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .file.dir{cursor:pointer}
 .file.dir:hover{border-color:var(--accent)}
 /* mark-for-deletion: the checkbox sits over the thumbnail, out of the way of
