@@ -90,12 +90,47 @@
     <h2 id="browser-title">Files</h2>
     <div class="crumbs" id="crumbs"></div>
     <span class="spacer"></span>
+    <div class="size-pick" id="sizePick" title="Preview size">
+      <span class="muted small">Size</span>
+      <button data-size="S">S</button>
+      <button data-size="M">M</button>
+      <button data-size="L">L</button>
+      <button data-size="XL">XL</button>
+    </div>
     <span id="selcount" class="muted small"></span>
     <button id="markAll" class="mini">Mark all</button>
+    <button id="dlMarked" class="mini" disabled>Download marked (.zip)</button>
     <button id="delMarked" class="danger" disabled>Delete marked files</button>
     <button class="x" data-close="browser" title="Close (Esc)">✕</button>
   </div>
   <div id="files" class="files"></div>
+</section>
+
+<section id="viewer" class="viewer hidden">
+  <div class="viewer-top">
+    <span id="viewer-name" class="viewer-name"></span>
+    <span id="viewer-count" class="muted small"></span>
+    <span class="spacer"></span>
+    <label class="chk"><input type="checkbox" id="viewer-mark"> Mark for deletion</label>
+    <button id="viewer-download" class="mini">Download</button>
+    <button class="x" id="viewer-close" title="Close (Esc)">✕</button>
+  </div>
+  <div class="viewer-stage" id="viewer-stage">
+    <img id="viewer-img" class="viewer-img" alt="" hidden>
+    <video id="viewer-video" controls hidden></video>
+    <audio id="viewer-audio" controls hidden></audio>
+    <div id="viewer-other" class="viewer-other" hidden>
+      <p class="muted">No preview for this file type.</p>
+      <button id="viewer-other-dl" class="primary">Download file</button>
+    </div>
+  </div>
+  <div class="viewer-nav">
+    <button id="viewer-prev" class="mini" title="Previous (←)">‹</button>
+    <button id="viewer-next" class="mini" title="Next (→)">›</button>
+    <span class="muted small" id="viewer-zoom-hint">Zoom</span>
+    <input type="range" id="viewer-zoom" min="25" max="600" value="100" step="5" disabled>
+    <span id="viewer-zoom-label" class="muted small">100%</span>
+  </div>
 </section>
 
 <div id="scrim" class="scrim"></div>

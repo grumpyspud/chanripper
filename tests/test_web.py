@@ -211,6 +211,31 @@ class WebApiTests(unittest.TestCase):
         r = self.tc.get("/api/threads/news/404/zip")
         self.assertEqual(r.status_code, 404)
 
+    # -- zip selected files -------------------------------------------------
+    def test_zip_selected_files(self):
+        self._seed()
+        r = self.tc.post("/api/files/zip", json={
+            "paths": ["4chan/news/1/file.png", "4chan/news/1/file (222).png"]})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.headers["content-type"], "application/zip")
+        with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+            names = set(zf.namelist())
+        self.assertEqual(names, {"file.png", "file (222).png"})
+
+    def test_zip_selected_refuses_dir(self):
+        self._seed()
+        r = self.tc.post("/api/files/zip", json={"paths": ["4chan/news/1"]})
+        self.assertEqual(r.status_code, 400)
+
+    def test_zip_selected_refuses_escape(self):
+        self._seed()
+        r = self.tc.post("/api/files/zip", json={"paths": ["../../etc/passwd"]})
+        self.assertEqual(r.status_code, 400)
+
+    def test_zip_selected_refuses_empty(self):
+        r = self.tc.post("/api/files/zip", json={"paths": []})
+        self.assertEqual(r.status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -247,6 +247,15 @@ document.querySelectorAll('[data-close]').forEach((b) => {
   b.onclick = () => (b.dataset.close === 'browser' ? closeBrowser() : closeDrawers());
 });
 document.addEventListener('keydown', (e) => {
+  // viewer is topmost: Esc closes it, arrow keys navigate (unless focus is in
+  // a form control where arrows mean something else, like the zoom slider)
+  if (!$('viewer').classList.contains('hidden')) {
+    if (e.key === 'Escape') { closeViewer(); return; }
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
+    if (e.key === 'ArrowLeft') { viewerNav(-1); return; }
+    if (e.key === 'ArrowRight') { viewerNav(1); return; }
+    return;
+  }
   if (e.key !== 'Escape') return;
   if (!$('browser').classList.contains('hidden')) closeBrowser();
   else closeDrawers();
@@ -301,8 +310,31 @@ $('saveSettings').onclick = async () => {
 
 /* ---------------- file browser ---------------- */
 
+const PREVIEWS = { S: 64, M: 96, L: 144, XL: 200 };
+let PREVIEW_SIZE = (function () {
+  try { return localStorage.getItem('cr-preview') || 'M'; } catch (e) { return 'M'; }
+})();
+
 let BROWSER_PATH = '';
-const MARKED = new Set();     // paths marked for deletion in the current folder
+let LAST_ENTRIES = null;    // last folder listing, for re-layout on a size change
+let FILES = [];             // ordered file entries (no dirs), for prev/next
+const MARKED = new Set();   // paths marked for deletion in the current folder
+const TILES = {};           // path -> tile element, for in-place mark updates
+
+const VIEWER = { idx: -1, path: '' };
+let ZOOM = 1.0;
+
+let _mspan = null;
+function measureText(s) {
+  if (!_mspan) {
+    _mspan = document.createElement('span');
+    _mspan.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;' +
+      'white-space:nowrap;font:11.5px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+    document.body.appendChild(_mspan);
+  }
+  _mspan.textContent = s;
+  return _mspan.offsetWidth;
+}
 
 function openBrowserPage() {
   closeDrawers();
@@ -310,8 +342,10 @@ function openBrowserPage() {
 }
 
 function closeBrowser() {
+  closeViewer();
   $('browser').classList.add('hidden');
   MARKED.clear();
+  LAST_ENTRIES = null;
   syncMarkUI();
 }
 
@@ -336,17 +370,49 @@ async function browse(path) {
   } catch (e) { toast('Failed: ' + e.message, true); }
 }
 
+function setPreviewSize(size) {
+  if (!PREVIEWS[size]) return;
+  PREVIEW_SIZE = size;
+  try { localStorage.setItem('cr-preview', size); } catch (e) { /* ignore */ }
+  $('sizePick').querySelectorAll('[data-size]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.size === size);
+  });
+  if (LAST_ENTRIES) renderFiles(LAST_ENTRIES);
+}
+
+// Uniform tiles: width fits the widest name, height is the thumbnail preset
+// plus a fixed meta block, so every box is the same size.
+function applyGridSize(entries) {
+  const th = PREVIEWS[PREVIEW_SIZE];
+  let maxName = 0;
+  (entries || []).forEach((f) => { maxName = Math.max(maxName, measureText(f.name)); });
+  const tileW = Math.round(Math.min(Math.max(maxName + 18, 96), 320));
+  $('files').style.setProperty('--thumb', th + 'px');
+  $('files').style.setProperty('--tile-w', tileW + 'px');
+}
+
 function syncMarkUI() {
   const n = MARKED.size;
-  const btn = $('delMarked');
-  btn.disabled = n === 0;
-  btn.textContent = n ? `Delete marked files (${n})` : 'Delete marked files';
+  const del = $('delMarked');
+  del.disabled = n === 0;
+  del.textContent = n ? `Delete marked files (${n})` : 'Delete marked files';
+  const dl = $('dlMarked');
+  dl.disabled = n === 0;
+  dl.textContent = n ? `Download marked (${n})` : 'Download marked (.zip)';
   $('selcount').textContent = n ? `${n} marked` : '';
 }
 
-function toggleMark(path, on, card) {
+function setMarked(path, on) {
   if (on) MARKED.add(path); else MARKED.delete(path);
-  if (card) card.classList.toggle('marked', on);
+  const tile = TILES[path];
+  if (tile) {
+    tile.classList.toggle('marked', on);
+    const box = tile.querySelector('.pick');
+    if (box) box.checked = on;
+  }
+  if (!$('viewer').classList.contains('hidden') && VIEWER.path === path) {
+    $('viewer-mark').checked = on;
+  }
   syncMarkUI();
 }
 
@@ -368,21 +434,26 @@ function renderCrumbs(path, parent) {
 }
 
 function renderFiles(entries) {
+  LAST_ENTRIES = entries;
+  FILES = entries.filter((f) => !f.dir);
+  for (const k in TILES) delete TILES[k];
+
   if (!entries.length) {
     $('files').innerHTML = '<p class="muted small">empty</p>';
     syncMarkUI();
     return;
   }
+
+  applyGridSize(entries);
   $('files').innerHTML = entries.map((f) => {
     const raw = '/api/files/raw?path=' + encodeURIComponent(f.path);
     let thumb = `<span>${esc(f.kind)}</span>`;
     if (f.kind === 'image') thumb = `<img loading="lazy" src="${esc(raw)}" alt="">`;
-    const click = f.dir ? `data-dir="${esc(f.path)}"` : `data-open="${esc(raw)}"`;
     const marked = !f.dir && MARKED.has(f.path);
     const pick = f.dir ? '' :
       `<input type="checkbox" class="pick" data-pick="${esc(f.path)}"` +
       ` title="Mark for deletion"${marked ? ' checked' : ''}>`;
-    return `<div class="file ${f.dir ? 'dir' : ''}${marked ? ' marked' : ''}" ${click}>
+    return `<div class="file ${f.dir ? 'dir' : ''}${marked ? ' marked' : ''}" data-path="${esc(f.path)}">
       ${pick}
       <div class="thumb">${thumb}</div>
       <div class="meta">
@@ -391,29 +462,123 @@ function renderFiles(entries) {
       </div>
     </div>`;
   }).join('');
+
+  $('files').querySelectorAll('.file').forEach((el) => { TILES[el.dataset.path] = el; });
   $('files').querySelectorAll('[data-pick]').forEach((el) => {
     el.onclick = (e) => {
       e.stopPropagation();          // don't open the file when ticking the box
-      toggleMark(el.dataset.pick, el.checked, el.closest('.file'));
+      setMarked(el.dataset.pick, el.checked);
     };
   });
-  $('files').querySelectorAll('[data-dir]').forEach((el) => {
-    el.onclick = () => browse(el.dataset.dir);
+  $('files').querySelectorAll('.file.dir').forEach((el) => {
+    el.onclick = () => browse(el.dataset.path);
   });
-  $('files').querySelectorAll('[data-open]').forEach((el) => {
-    el.onclick = () => window.open(el.dataset.open, '_blank');
+  $('files').querySelectorAll('.file:not(.dir)').forEach((el) => {
+    el.onclick = () => openViewer(el.dataset.path);
   });
   syncMarkUI();
 }
+
+/* ---------------- item preview overlay ---------------- */
+
+function openViewer(path) {
+  const idx = FILES.findIndex((f) => f.path === path);
+  if (idx === -1) return;
+  VIEWER.idx = idx;
+  VIEWER.path = path;
+  $('viewer').classList.remove('hidden');
+  renderViewer();
+}
+
+function closeViewer() {
+  $('viewer').classList.add('hidden');
+  const v = $('viewer-video'); v.pause(); v.removeAttribute('src'); v.load();
+  const a = $('viewer-audio'); a.pause(); a.removeAttribute('src'); a.load();
+  $('viewer-img').removeAttribute('src');
+  VIEWER.path = '';
+}
+
+function viewerNav(dir) {
+  const ni = VIEWER.idx + dir;
+  if (ni < 0 || ni >= FILES.length) return;
+  VIEWER.idx = ni;
+  renderViewer();
+}
+
+function renderViewer() {
+  const f = FILES[VIEWER.idx];
+  if (!f) { closeViewer(); return; }
+  VIEWER.path = f.path;
+  $('viewer-name').textContent = f.name;
+  $('viewer-count').textContent = `${VIEWER.idx + 1} / ${FILES.length}`;
+  $('viewer-mark').checked = MARKED.has(f.path);
+
+  const raw = '/api/files/raw?path=' + encodeURIComponent(f.path);
+  const dl = raw + '&download=true';
+
+  ZOOM = 1.0;
+  $('viewer-zoom').value = 100;
+  $('viewer-zoom-label').textContent = '100%';
+  $('viewer-img').hidden = true;
+  $('viewer-video').hidden = true;
+  $('viewer-audio').hidden = true;
+  $('viewer-other').hidden = true;
+  $('viewer-zoom').disabled = true;
+
+  $('viewer-download').onclick = () => { window.location = dl; };
+  $('viewer-prev').disabled = VIEWER.idx === 0;
+  $('viewer-next').disabled = VIEWER.idx === FILES.length - 1;
+
+  if (f.kind === 'image') {
+    $('viewer-zoom').disabled = false;
+    const img = $('viewer-img');
+    img.hidden = false;
+    img.onload = () => applyZoom();
+    img.src = raw;
+  } else if (f.kind === 'video') {
+    const v = $('viewer-video');
+    v.hidden = false;
+    v.src = raw;
+  } else if (f.kind === 'audio') {
+    const a = $('viewer-audio');
+    a.hidden = false;
+    a.src = raw;
+  } else {
+    $('viewer-other').hidden = false;
+    $('viewer-other-dl').onclick = () => { window.location = dl; };
+  }
+}
+
+function applyZoom() {
+  const img = $('viewer-img');
+  if (img.hidden) return;
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  if (!iw || !ih) return;
+  const stage = $('viewer-stage');
+  const scale = Math.min(stage.clientWidth / iw, stage.clientHeight / ih);
+  img.style.width = (iw * scale * ZOOM) + 'px';
+  img.style.height = (ih * scale * ZOOM) + 'px';
+}
+
+function setZoom(z) {
+  ZOOM = Math.min(6, Math.max(0.25, z));
+  $('viewer-zoom').value = Math.round(ZOOM * 100);
+  $('viewer-zoom-label').textContent = Math.round(ZOOM * 100) + '%';
+  applyZoom();
+}
+
+/* ---------------- wiring ---------------- */
+
+$('sizePick').querySelectorAll('[data-size]').forEach((b) => {
+  b.classList.toggle('active', b.dataset.size === PREVIEW_SIZE);
+  b.onclick = () => setPreviewSize(b.dataset.size);
+});
 
 $('markAll').onclick = () => {
   const boxes = [...document.querySelectorAll('#files [data-pick]')];
   if (!boxes.length) return;
   const all = boxes.every((b) => b.checked);
-  boxes.forEach((b) => {
-    b.checked = !all;
-    toggleMark(b.dataset.pick, !all, b.closest('.file'));
-  });
+  boxes.forEach((b) => setMarked(b.dataset.pick, !all));
 };
 
 $('delMarked').onclick = async () => {
@@ -437,6 +602,59 @@ $('delMarked').onclick = async () => {
     syncMarkUI();
   }
 };
+
+$('dlMarked').onclick = async () => {
+  const paths = [...MARKED];
+  if (!paths.length) return;
+  const btn = $('dlMarked');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/files/zip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths }),
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try { detail = (await res.json()).detail || detail; } catch (e) { /* ignore */ }
+      throw new Error(detail);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'chanripper-files.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast(`Zipped ${paths.length} file${paths.length === 1 ? '' : 's'}`);
+  } catch (e) {
+    toast('Zip failed: ' + e.message, true);
+  } finally {
+    syncMarkUI();
+  }
+};
+
+$('viewer-close').onclick = closeViewer;
+$('viewer-prev').onclick = () => viewerNav(-1);
+$('viewer-next').onclick = () => viewerNav(1);
+$('viewer-mark').onchange = () => {
+  const f = FILES[VIEWER.idx];
+  if (f) setMarked(f.path, $('viewer-mark').checked);
+};
+$('viewer-zoom').oninput = () => setZoom(Number($('viewer-zoom').value) / 100);
+$('viewer-img').ondblclick = () => setZoom(1);
+$('viewer-stage').addEventListener('wheel', (e) => {
+  if ($('viewer').classList.contains('hidden')) return;
+  const f = FILES[VIEWER.idx];
+  if (!f || f.kind !== 'image') return;
+  e.preventDefault();
+  setZoom(ZOOM * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+}, { passive: false });
+window.addEventListener('resize', () => {
+  if (!$('viewer').classList.contains('hidden')) applyZoom();
+});
 
 /* ---------------- boot ---------------- */
 

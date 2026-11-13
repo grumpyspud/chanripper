@@ -434,6 +434,50 @@ async def delete_files(body: DeleteFiles) -> dict:
     return {"deleted": deleted, "failed": failed, "bytes": freed}
 
 
+@app.post("/api/files/zip")
+async def zip_files(body: DeleteFiles, background: BackgroundTasks):
+    """Zip the selected files (flat archive, one file per entry).
+
+    All paths are re-validated against the download root and must be regular
+    files; directories and missing paths are refused up front so the archive
+    is never built from a half-valid list.
+    """
+    if not body.paths:
+        raise HTTPException(status_code=400, detail="no paths given")
+
+    targets: list[Path] = []
+    for rel in body.paths:
+        try:
+            target = safe_path(rel)
+        except HTTPException as exc:
+            raise HTTPException(status_code=400, detail=exc.detail)
+        if not target.is_file():
+            raise HTTPException(status_code=400, detail=f"not a file: {rel}")
+        targets.append(target)
+
+    tmpdir = Path(os.environ.get("CHANRIPPER_TMP", "/tmp"))
+    tmpdir.mkdir(parents=True, exist_ok=True)
+    handle = tempfile_path(tmpdir, "files")
+
+    def build() -> Path:
+        seen: set[str] = set()
+        with zipfile.ZipFile(handle, "w", zipfile.ZIP_DEFLATED,
+                             compresslevel=6) as zf:
+            for target in targets:
+                arcname = target.name
+                while arcname in seen:            # two same-named files: dedupe
+                    stem, dot, ext = target.name.rpartition(".")
+                    arcname = f"{stem} ({len(seen)}){dot + ext if dot else ''}"
+                seen.add(arcname)
+                zf.write(target, arcname)
+        return handle
+
+    await run_in_threadpool(build)
+    background.add_task(lambda: handle.unlink(missing_ok=True))
+    return FileResponse(handle, filename="chanripper-files.zip",
+                        media_type="application/zip")
+
+
 @app.get("/api/threads/{board}/{no}/zip")
 async def zip_thread(board: str, no: int, background: BackgroundTasks):
     rec = STATE.store.get_thread(board, no)

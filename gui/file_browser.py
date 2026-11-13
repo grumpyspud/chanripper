@@ -1,24 +1,33 @@
-"""Full-window file browser with mark-for-deletion.
+"""Full-window file browser with mark-for-deletion and an item preview.
 
 Mirrors the web UI on purpose: a full-page layout, a breadcrumb, the same
-"Mark all" / "Delete marked files" pair and the same dark palette. Marking is
-one click on a tile (double-click opens it); a marked tile gets a red corner
-badge and a red border. The media ledger is untouched by a delete, so a removed
-file is never re-downloaded on the next check.
+"Mark all" / "Delete marked files" pair, the same dark palette, a preview-size
+selector (S/M/L/XL) and a zoomable preview overlay. Marking is one click on a
+tile (double-click opens the preview); a marked tile gets a red corner badge
+and a red border. The media ledger is untouched by a delete, so a removed file
+is never re-downloaded on the next check.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import (QColor, QDesktopServices, QFont, QIcon, QImageReader,
                            QPainter, QPen, QPixmap)
-from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QListWidget,
-                               QListWidgetItem, QMessageBox, QPushButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QDialog, QHBoxLayout, QLabel,
+                               QListWidget, QListWidgetItem, QMessageBox,
+                               QPushButton, QScrollArea, QSlider, QVBoxLayout,
+                               QWidget)
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
-THUMB = QSize(140, 92)
+
+#: Preview-size presets (height, with a 3:2-ish width), matching web/static/app.js.
+THUMB_SIZES = {
+    "S": QSize(96, 64),
+    "M": QSize(144, 96),
+    "L": QSize(216, 144),
+    "XL": QSize(300, 200),
+}
 
 #: Same colours as web/static/style.css, so the two front ends feel alike.
 STYLE = """
@@ -31,6 +40,8 @@ QPushButton{background:#22262e; border:1px solid #2e333d; border-radius:7px;
             color:#e6e9ef; padding:7px 12px; font-size:13px}
 QPushButton:hover{background:#272c35; border-color:#3d4450}
 QPushButton:disabled{color:#5a616d; background:#1b1e24}
+QPushButton:checked{background:#4a9eff; border-color:#4a9eff; color:#04121f;
+                   font-weight:600}
 QPushButton#close{background:none; border:none; color:#8b93a1; font-size:16px;
                   padding:2px 8px}
 QPushButton#danger:hover{border-color:#f85149; color:#f85149}
@@ -39,8 +50,15 @@ QListWidget::item{background:#22262e; border:1px solid #2e333d; border-radius:8p
                   color:#e6e9ef; padding:6px}
 QListWidget::item:selected{background:#22262e; border:1px solid #f85149; color:#e6e9ef}
 QScrollBar:vertical{background:#14161a; width:10px}
+QScrollBar:horizontal{background:#14161a; height:10px}
 QScrollBar::handle:vertical{background:#2e333d; border-radius:5px; min-height:30px}
+QScrollBar::handle:horizontal{background:#2e333d; border-radius:5px; min-width:30px}
 QScrollBar::add-line,QScrollBar::sub-line{height:0}
+QScrollArea{background:#0e1013; border:none}
+QCheckBox{color:#e6e9ef; font-size:13px}
+QSlider::groove:horizontal{height:4px; background:#2e333d; border-radius:2px}
+QSlider::handle:horizontal{width:14px; margin:-5px 0; background:#4a9eff;
+                           border-radius:7px}
 """
 
 
@@ -63,6 +81,9 @@ class FileBrowser(QDialog):
         self.path = ""                       # relative to root
         self.marked: set[str] = set()
         self._pixmaps: dict[str, QPixmap] = {}
+        self.file_rels: list[str] = []       # ordered non-dir entries (for preview)
+        self.thumb_size = THUMB_SIZES["M"]
+        self._current: Path = self.root
 
         self.setWindowTitle(f"Files — {self.title}")
         self.setStyleSheet(STYLE)
@@ -108,6 +129,20 @@ class FileBrowser(QDialog):
         bar_lay.addWidget(self.crumbs)
         bar_lay.addStretch(1)
 
+        size_label = QLabel("Size")
+        size_label.setObjectName("muted")
+        bar_lay.addWidget(size_label)
+
+        self._size_btns: dict[str, QPushButton] = {}
+        for lvl in ("S", "M", "L", "XL"):
+            btn = QPushButton(lvl)
+            btn.setCheckable(True)
+            btn.setToolTip(f"Preview size {lvl}")
+            btn.clicked.connect(lambda _c, l=lvl: self._set_size(l))
+            bar_lay.addWidget(btn)
+            self._size_btns[lvl] = btn
+        self._size_btns["M"].setChecked(True)
+
         self.count_label = QLabel("")
         self.count_label.setObjectName("muted")
         bar_lay.addWidget(self.count_label)
@@ -135,10 +170,10 @@ class FileBrowser(QDialog):
         self.list.setMovement(QListWidget.Static)
         self.list.setWrapping(True)
         self.list.setSpacing(6)
-        self.list.setIconSize(THUMB)
-        self.list.setGridSize(QSize(170, 172))
+        self.list.setIconSize(self.thumb_size)
         self.list.setUniformItemSizes(True)
-        self.list.setWordWrap(True)
+        self.list.setWordWrap(False)
+        self.list.setTextElideMode(Qt.ElideMiddle)
         self.list.itemClicked.connect(self._on_click)
         self.list.itemDoubleClicked.connect(self._on_double_click)
         lay.addWidget(self.list, 1)
@@ -156,15 +191,27 @@ class FileBrowser(QDialog):
             return
         self.path = "" if target == self.root else str(
             target.relative_to(self.root)).replace("\\", "/")
+        self._current = target
         self.marked.clear()            # marks never outlive the folder
         self._fill(target)
         self._render_crumbs()
         self._refresh_buttons()
 
+    def _grid_size(self, names: list[str]) -> QSize:
+        fm = self.list.fontMetrics()
+        max_w = self.thumb_size.width()
+        for n in names:
+            max_w = max(max_w, fm.horizontalAdvance(n))
+        w = min(max_w + 24, 320)
+        h = self.thumb_size.height() + 2 * fm.lineSpacing() + 16
+        return QSize(w, h)
+
     def _fill(self, folder: Path) -> None:
         self.list.blockSignals(True)
         self.list.clear()
         self._pixmaps.clear()
+        self.file_rels = []
+        names: list[str] = []
         try:
             children = sorted(folder.iterdir(),
                               key=lambda p: (p.is_file(), p.name.lower()))
@@ -177,6 +224,9 @@ class FileBrowser(QDialog):
             except OSError:
                 continue
             rel = str(child.relative_to(self.root)).replace("\\", "/")
+            names.append(child.name)
+            if not is_dir:
+                self.file_rels.append(rel)
             label = f"{child.name}\n{'folder' if is_dir else human(size)}"
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, rel)
@@ -188,14 +238,25 @@ class FileBrowser(QDialog):
             else:
                 item.setToolTip(
                     f"{child.name} — click to mark for deletion, "
-                    "double-click to open")
+                    "double-click to preview")
                 item.setIcon(self._file_icon(rel, child, marked=False))
             self.list.addItem(item)
+        self.list.setGridSize(self._grid_size(names))
         self.list.blockSignals(False)
+
+    def _set_size(self, lvl: str) -> None:
+        if lvl not in THUMB_SIZES:
+            return
+        self.thumb_size = THUMB_SIZES[lvl]
+        for l, btn in self._size_btns.items():
+            btn.setChecked(l == lvl)
+        self.list.setIconSize(self.thumb_size)
+        self._pixmaps.clear()
+        self._fill(self._current)
 
     # -- artwork -------------------------------------------------------------
     def _dir_icon(self) -> QIcon:
-        pm = QPixmap(THUMB)
+        pm = QPixmap(self.thumb_size)
         pm.fill(Qt.transparent)
         return QIcon(pm)
 
@@ -208,13 +269,13 @@ class FileBrowser(QDialog):
             reader = QImageReader(str(path))
             # Decode straight to thumbnail size: 150 full-resolution images
             # would cost hundreds of MB for icons nobody sees that big.
-            reader.setScaledSize(THUMB)
+            reader.setScaledSize(self.thumb_size)
             img = reader.read()
             if not img.isNull():
                 pm = QPixmap.fromImage(img)
                 self._pixmaps[rel] = pm
                 return pm
-        pm = QPixmap(THUMB)
+        pm = QPixmap(self.thumb_size)
         pm.fill(QColor("#1b1e24"))
         painter = QPainter(pm)
         painter.setPen(QColor("#8b93a1"))
@@ -274,8 +335,9 @@ class FileBrowser(QDialog):
         self._click_item = None
         if item.data(Qt.UserRole + 1):
             return                       # already handled by the single click
-        QDesktopServices.openUrl(
-            QUrl.fromLocalFile(str(self.root / item.data(Qt.UserRole))))
+        rel = item.data(Qt.UserRole)
+        idx = self.file_rels.index(rel) if rel in self.file_rels else 0
+        FilePreview(self, idx, parent=self).exec()
 
     def _flush_click(self) -> None:
         item, self._click_item = self._click_item, None
@@ -286,12 +348,24 @@ class FileBrowser(QDialog):
         if item.data(Qt.UserRole + 1):
             return
         rel = item.data(Qt.UserRole)
-        if rel in self.marked:
-            self.marked.discard(rel)
-        else:
+        self.mark_path(rel, rel not in self.marked)
+
+    def _item_for(self, rel: str) -> QListWidgetItem | None:
+        for n in range(self.list.count()):
+            it = self.list.item(n)
+            if it.data(Qt.UserRole) == rel:
+                return it
+        return None
+
+    def mark_path(self, rel: str, on: bool) -> None:
+        """Mark/unmark a file by its relative path (used by the preview)."""
+        if on:
             self.marked.add(rel)
-        path = self.root / rel
-        item.setIcon(self._file_icon(rel, path, marked=rel in self.marked))
+        else:
+            self.marked.discard(rel)
+        item = self._item_for(rel)
+        if item is not None:
+            item.setIcon(self._file_icon(rel, self.root / rel, marked=on))
         self._refresh_buttons()
 
     def _file_items(self) -> list[QListWidgetItem]:
@@ -354,3 +428,257 @@ class FileBrowser(QDialog):
             self.reject()
             return
         super().keyPressEvent(event)
+
+
+class _ZoomScroll(QScrollArea):
+    """A scroll area whose wheel zooms instead of scrolling."""
+
+    def __init__(self, on_wheel, parent=None):
+        super().__init__(parent)
+        self._on_wheel = on_wheel
+
+    def wheelEvent(self, event) -> None:
+        if event.angleDelta().y() != 0:
+            self._on_wheel(event.angleDelta().y() > 0)
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+
+class _PanLabel(QLabel):
+    """A label you can drag to pan a zoomed image, double-click to fit."""
+
+    def __init__(self, scroll: QScrollArea, on_double, parent=None):
+        super().__init__(parent)
+        self._scroll = scroll
+        self._on_double = on_double
+        self._start = None
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._start = (event.position().toPoint(),
+                           self._scroll.horizontalScrollBar().value(),
+                           self._scroll.verticalScrollBar().value())
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._start is not None:
+            start, hx, hy = self._start
+            delta = event.position().toPoint() - start
+            self._scroll.horizontalScrollBar().setValue(hx - delta.x())
+            self._scroll.verticalScrollBar().setValue(hy - delta.y())
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._start = None
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        self._on_double()
+        super().mouseDoubleClickEvent(event)
+
+
+class FilePreview(QDialog):
+    """Single-item preview: images zoom (slider + wheel + drag), everything
+    else shows a placeholder with an "Open in player" action. Prev/next walk
+    the folder's files; a checkbox mirrors the parent's mark-for-deletion set.
+    """
+
+    def __init__(self, browser: FileBrowser, index: int, parent=None):
+        super().__init__(parent)
+        self.browser = browser
+        self.files = list(browser.file_rels)
+        self.index = index
+        self.scale = 1.0
+        self._full: QPixmap | None = None
+
+        self.setWindowTitle("Preview")
+        self.setStyleSheet(STYLE)
+        self.resize(920, 720)
+        if parent is not None:
+            self.move(parent.mapToGlobal(parent.rect().topLeft()) + QPoint(24, 24))
+
+        self._build()
+        self._show_index(index)
+
+    def _build(self) -> None:
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        top = QWidget()
+        top_lay = QHBoxLayout(top)
+        top_lay.setContentsMargins(16, 12, 16, 12)
+        top_lay.setSpacing(12)
+
+        self.name_label = QLabel("")
+        self.name_label.setObjectName("title")
+        top_lay.addWidget(self.name_label)
+
+        self.count_label = QLabel("")
+        self.count_label.setObjectName("muted")
+        top_lay.addWidget(self.count_label)
+        top_lay.addStretch(1)
+
+        self.mark_box = QCheckBox("Mark for deletion")
+        self.mark_box.toggled.connect(self._on_mark)
+        top_lay.addWidget(self.mark_box)
+
+        self.open_btn = QPushButton("Open in player")
+        self.open_btn.clicked.connect(self._open_current)
+        top_lay.addWidget(self.open_btn)
+
+        close_btn = QPushButton("✕")
+        close_btn.setObjectName("close")
+        close_btn.setToolTip("Close (Esc)")
+        close_btn.clicked.connect(self.reject)
+        top_lay.addWidget(close_btn)
+        lay.addWidget(top)
+
+        self.scroll = _ZoomScroll(self._on_wheel)
+        self.scroll.setAlignment(Qt.AlignCenter)
+        self.image_label = _PanLabel(self.scroll, lambda: self._set_zoom(1.0))
+        self.image_label.setStyleSheet("background:#0e1013; border:none")
+        self.scroll.setWidget(self.image_label)
+        lay.addWidget(self.scroll, 1)
+
+        nav = QWidget()
+        nav_lay = QHBoxLayout(nav)
+        nav_lay.setContentsMargins(16, 10, 16, 10)
+        nav_lay.setSpacing(12)
+
+        self.prev_btn = QPushButton("‹")
+        self.prev_btn.setToolTip("Previous (←)")
+        self.prev_btn.clicked.connect(lambda: self._nav(-1))
+        nav_lay.addWidget(self.prev_btn)
+
+        self.next_btn = QPushButton("›")
+        self.next_btn.setToolTip("Next (→)")
+        self.next_btn.clicked.connect(lambda: self._nav(1))
+        nav_lay.addWidget(self.next_btn)
+
+        nav_lay.addWidget(QLabel("Zoom"))
+
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(25, 600)
+        self.slider.setValue(100)
+        self.slider.valueChanged.connect(self._on_slider)
+        nav_lay.addWidget(self.slider, 1)
+
+        self.zoom_label = QLabel("100%")
+        self.zoom_label.setObjectName("muted")
+        self.zoom_label.setMinimumWidth(44)
+        nav_lay.addWidget(self.zoom_label)
+        lay.addWidget(nav)
+
+    # -- current item --------------------------------------------------------
+    def _show_index(self, i: int) -> None:
+        self.index = i
+        rel = self.files[i]
+        path = self.browser.root / rel
+        name = Path(rel).name
+
+        self.name_label.setText(name)
+        self.count_label.setText(f"{i + 1} / {len(self.files)}")
+
+        self.mark_box.blockSignals(True)
+        self.mark_box.setChecked(rel in self.browser.marked)
+        self.mark_box.blockSignals(False)
+
+        self._full = None
+        self.scale = 1.0
+        self.slider.blockSignals(True)
+        self.slider.setValue(100)
+        self.slider.blockSignals(False)
+        self.zoom_label.setText("100%")
+
+        self.prev_btn.setEnabled(i > 0)
+        self.next_btn.setEnabled(i < len(self.files) - 1)
+
+        if path.suffix.lower() in IMAGE_EXT:
+            self.slider.setEnabled(True)
+            self.open_btn.setVisible(False)
+            self._load_image(path)
+        else:
+            self.slider.setEnabled(False)
+            self.open_btn.setVisible(True)
+            self._show_placeholder(name)
+
+    def _load_image(self, path: Path) -> None:
+        reader = QImageReader(str(path))
+        reader.setAutoTransform(True)
+        img = reader.read()
+        if img.isNull():
+            self._show_placeholder(Path(path).name)
+            return
+        self._full = QPixmap.fromImage(img)
+        self._apply_zoom()
+
+    def _show_placeholder(self, name: str) -> None:
+        self.image_label.setPixmap(QPixmap())
+        self.image_label.setText(
+            f"{name}\n\nNo preview for this file type.\n"
+            "Use 'Open in player' to view it.")
+        self.image_label.setAlignment(Qt.AlignCenter)
+        vp = self.scroll.viewport().size()
+        self.image_label.resize(max(1, vp.width() - 8), max(1, vp.height() - 8))
+
+    def _apply_zoom(self) -> None:
+        if self._full is None:
+            return
+        self.image_label.setAlignment(Qt.AlignCenter)
+        vp = self.scroll.viewport().size()
+        iw, ih = self._full.width(), self._full.height()
+        fit = min(vp.width() / iw, vp.height() / ih) if iw and ih else 1.0
+        w = max(1, int(iw * fit * self.scale))
+        h = max(1, int(ih * fit * self.scale))
+        pm = self._full.scaled(QSize(w, h), Qt.KeepAspectRatio,
+                               Qt.SmoothTransformation)
+        self.image_label.setPixmap(pm)
+        self.image_label.resize(pm.size())
+        pan = (self.scroll.horizontalScrollBar().maximum() > 0 or
+               self.scroll.verticalScrollBar().maximum() > 0)
+        self.image_label.setCursor(
+            Qt.ClosedHandCursor if pan else Qt.ArrowCursor)
+
+    # -- controls ------------------------------------------------------------
+    def _on_slider(self, val: int) -> None:
+        self.scale = val / 100.0
+        self.zoom_label.setText(f"{val}%")
+        self._apply_zoom()
+
+    def _set_zoom(self, scale: float) -> None:
+        self.scale = max(0.25, min(6.0, scale))
+        val = round(self.scale * 100)
+        self.slider.blockSignals(True)
+        self.slider.setValue(val)
+        self.slider.blockSignals(False)
+        self.zoom_label.setText(f"{val}%")
+        self._apply_zoom()
+
+    def _on_wheel(self, up: bool) -> None:
+        if self._full is None:
+            return
+        self._set_zoom(self.scale * (1.15 if up else 1 / 1.15))
+
+    def _nav(self, d: int) -> None:
+        ni = self.index + d
+        if 0 <= ni < len(self.files):
+            self._show_index(ni)
+
+    def _on_mark(self, checked: bool) -> None:
+        self.browser.mark_path(self.files[self.index], checked)
+
+    def _open_current(self) -> None:
+        QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(self.browser.root / self.files[self.index])))
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Escape:
+            self.reject()
+        elif event.key() == Qt.Key_Left:
+            self._nav(-1)
+        elif event.key() == Qt.Key_Right:
+            self._nav(1)
+        else:
+            super().keyPressEvent(event)

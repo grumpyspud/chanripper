@@ -18,7 +18,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication, QMessageBox
-    from gui.file_browser import FileBrowser
+    from gui.file_browser import FileBrowser, FilePreview
     HAVE_QT = True
 except Exception:                                   # pragma: no cover
     HAVE_QT = False
@@ -94,6 +94,36 @@ class TestFileBrowser(unittest.TestCase):
     def test_cannot_navigate_outside_the_root(self):
         self.dlg.browse("../../../../etc")
         self.assertEqual(self.dlg.path, "4chan/g/1")
+
+    def test_preview_builds_and_navigates(self):
+        p = FilePreview(self.dlg, 0)
+        try:
+            self.assertEqual(p.files, ["4chan/g/1/a.png", "4chan/g/1/b.png",
+                                       "4chan/g/1/c.webm"])
+            self.assertEqual(p.name_label.text(), "a.png")
+            self.assertFalse(p.prev_btn.isEnabled())       # first item
+            self.assertTrue(p.next_btn.isEnabled())
+            # marking through the preview checkbox updates the parent's set
+            p.mark_box.setChecked(True)
+            self.assertIn("4chan/g/1/a.png", self.dlg.marked)
+            # next/prev navigation
+            p._nav(1)
+            self.assertEqual(p.name_label.text(), "b.png")
+            self.assertEqual(p.count_label.text(), "2 / 3")
+            p._nav(-1)
+            self.assertEqual(p.name_label.text(), "a.png")
+        finally:
+            p.reject()
+
+    def test_preview_zoom_stays_in_bounds(self):
+        p = FilePreview(self.dlg, 0)
+        try:
+            p._set_zoom(100.0)
+            self.assertLessEqual(p.scale, 6.0)
+            p._set_zoom(0.0001)
+            self.assertGreaterEqual(p.scale, 0.25)
+        finally:
+            p.reject()
 
 
 if __name__ == "__main__":
