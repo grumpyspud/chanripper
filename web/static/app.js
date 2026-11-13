@@ -55,9 +55,11 @@ function formatDate(ts, format) {
 function fileMeta(f, fmt) {
   const date = f.mtime ? formatDate(f.mtime, fmt) : '';
   return f.dir
-    ? ('folder' + (date ? ' · ' + date : ''))
+    ? date
     : (human(f.size) + (date ? ' · ' + date : ''));
 }
+
+const DIR_ICON = `<svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>`;
 
 function toast(msg, bad) {
   const t = $('toast');
@@ -437,7 +439,7 @@ function applyGridSize(entries) {
   (entries || []).forEach((f) => {
     maxW = Math.max(maxW, measureText(f.name), measureText(fileMeta(f, fmt)));
   });
-  const tileW = Math.round(Math.min(Math.max(maxW + 18, 96), 320));
+  const tileW = Math.round(Math.min(Math.max(maxW + 26, 96), 320));
   $('files').style.setProperty('--thumb', th + 'px');
   $('files').style.setProperty('--tile-w', tileW + 'px');
 }
@@ -500,7 +502,8 @@ function renderFiles(entries) {
   $('files').innerHTML = entries.map((f) => {
     const raw = '/api/files/raw?path=' + encodeURIComponent(f.path);
     let thumb = `<span>${esc(f.kind)}</span>`;
-    if (f.kind === 'image') thumb = `<img loading="lazy" src="${esc(raw)}" alt="">`;
+    if (f.dir) thumb = DIR_ICON;
+    else if (f.kind === 'image') thumb = `<img loading="lazy" src="${esc(raw)}" alt="">`;
     const marked = !f.dir && MARKED.has(f.path);
     const pick = f.dir ? '' :
       `<input type="checkbox" class="pick" data-pick="${esc(f.path)}"` +

@@ -265,8 +265,10 @@ class FileBrowser(QDialog):
             if not is_dir:
                 self.file_rels.append(rel)
             date = format_ts(mtime, self.date_format)
-            meta = (f"folder · {date}" if is_dir else f"{human(size)} · {date}") if date \
-                else ("folder" if is_dir else human(size))
+            if is_dir:
+                meta = date
+            else:
+                meta = f"{human(size)} · {date}" if date else human(size)
             metas.append(meta)
             label = f"{child.name}\n{meta}"
             item = QListWidgetItem(label)

@@ -121,6 +121,7 @@ button.mini:disabled{opacity:.45; cursor:default}
 }
 .file .thumb img{max-width:100%; max-height:var(--thumb,96px); object-fit:contain; display:block}
 .file .thumb span{color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.5px}
+.file .thumb svg{color:var(--muted)}
 .file .meta{padding:6px 8px; font-size:11.5px; display:flex; flex-direction:column;
             gap:3px; height:56px; box-sizing:border-box; flex:none}
 .file .name{word-break:break-all; line-height:1.25; overflow:hidden;
