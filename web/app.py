@@ -200,6 +200,7 @@ class SettingsPatch(BaseModel):
     board_dir: bool | None = None
     folder_mode: str | None = None
     name_mode: str | None = None
+    date_format: str | None = None
     default_delay: float | None = None
     default_comments: bool | None = None
     max_workers: int | None = None

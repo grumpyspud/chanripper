@@ -135,6 +135,7 @@ class MainWindow(QMainWindow):
                             ("Open folder", self.open_selected_folder),
                             ("Start all", self.start_all),
                             ("Stop all", self.stop_all),
+                            ("Browser", self.open_browser),
                             ("Open root", self.open_root),
                             ("Settings", self.open_settings)):
             act = QAction(label, self)
@@ -328,7 +329,17 @@ class MainWindow(QMainWindow):
         if not rec or not rec.get("folder"):
             return
         FileBrowser(self.settings.root, start=rec["folder"],
-                    title=f"/{board}/{no}/", parent=self).exec()
+                    title=f"/{board}/{no}/",
+                    date_format=self.settings.date_format, parent=self).exec()
+
+    def open_browser(self) -> None:
+        """In-app file browser at the 4chan base folder, for deleted/untracked threads."""
+        root = Path(self.settings.root)
+        start = root / "4chan"
+        if not start.is_dir():
+            start = root
+        FileBrowser(self.settings.root, start=str(start), title="Browser",
+                    date_format=self.settings.date_format, parent=self).exec()
 
     def open_selected_folder(self) -> None:
         for board, no in self._selected_keys():

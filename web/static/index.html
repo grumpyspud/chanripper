@@ -26,6 +26,7 @@
   <button id="startAll">Start all</button>
   <button id="stopAll">Stop all</button>
   <button id="refresh">Refresh</button>
+  <button id="openBrowser">Browser</button>
   <button id="openSettings">Settings</button>
   <span class="spacer"></span>
   <span id="busy" class="muted"></span>
@@ -64,6 +65,14 @@
       <select id="s-name_mode">
         <option value="uploader">Uploader's filename</option>
         <option value="number">4chan file number</option>
+      </select>
+    </label>
+    <label>Date/time format
+      <select id="s-date_format">
+        <option value="iso">ISO (2026-11-13 14:30)</option>
+        <option value="us">US (11/13/2026 2:30 PM)</option>
+        <option value="euro">European (13/11/2026 14:30)</option>
+        <option value="relative">Relative (3h ago)</option>
       </select>
     </label>
     <label>Default delay between checks (seconds)

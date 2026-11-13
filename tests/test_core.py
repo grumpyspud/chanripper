@@ -416,6 +416,15 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(s.folder_mode, "both")
         self.assertEqual(s.name_mode, "uploader")
 
+    def test_date_format_falls_back(self):
+        s = Settings(date_format="nope").normalize()
+        self.assertEqual(s.date_format, "iso")
+
+    def test_date_format_roundtrip(self):
+        for fmt in ("iso", "us", "euro", "relative"):
+            s = Settings(date_format=fmt).normalize()
+            self.assertEqual(s.date_format, fmt)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

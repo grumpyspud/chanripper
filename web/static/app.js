@@ -26,6 +26,32 @@ function hhmmss(unix) {
   return d.toLocaleTimeString();
 }
 
+function relTime(ts) {
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (s < 60) return 'just now';
+  const m = Math.floor(s / 60); if (m < 60) return m + 'm ago';
+  const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+  const d = Math.floor(h / 24); if (d < 30) return d + 'd ago';
+  const mo = Math.floor(d / 30); if (mo < 12) return mo + 'mo ago';
+  return Math.floor(mo / 12) + 'y ago';
+}
+
+function formatDate(ts, format) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  const y = d.getFullYear(), mo = p(d.getMonth() + 1), day = p(d.getDate());
+  const h24 = p(d.getHours()), mi = p(d.getMinutes());
+  if (format === 'relative') return relTime(ts);
+  if (format === 'us') {
+    let h = d.getHours(); const ap = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    return `${mo}/${day}/${y} ${h}:${mi} ${ap}`;
+  }
+  if (format === 'euro') return `${day}/${mo}/${y} ${h24}:${mi}`;
+  return `${y}-${mo}-${day} ${h24}:${mi}`;
+}
+
 function toast(msg, bad) {
   const t = $('toast');
   t.textContent = msg;
@@ -242,6 +268,7 @@ function closeDrawers() {
   SETTINGS_OPEN = false;
 }
 $('openSettings').onclick = () => openDrawer('settings');
+$('openBrowser').onclick = openRootBrowser;
 $('scrim').onclick = closeDrawers;
 document.querySelectorAll('[data-close]').forEach((b) => {
   b.onclick = () => (b.dataset.close === 'browser' ? closeBrowser() : closeDrawers());
@@ -269,6 +296,7 @@ function fillSettings() {
   $('s-board_dir').checked = !!s.board_dir;
   $('s-folder_mode').value = s.folder_mode || 'both';
   $('s-name_mode').value = s.name_mode || 'uploader';
+  $('s-date_format').value = s.date_format || 'iso';
   $('s-default_delay').value = Math.round(s.default_delay || 10);
   $('s-default_comments').checked = !!s.default_comments;
   $('s-max_workers').value = s.max_workers || 3;
@@ -296,6 +324,7 @@ $('saveSettings').onclick = async () => {
         board_dir: $('s-board_dir').checked,
         folder_mode: $('s-folder_mode').value,
         name_mode: $('s-name_mode').value,
+        date_format: $('s-date_format').value,
         default_delay: Number($('s-default_delay').value),
         default_comments: $('s-default_comments').checked,
         max_workers: Number($('s-max_workers').value),
@@ -360,6 +389,17 @@ async function openBrowser(board, no) {
   await browse(path);
 }
 
+// The "Browser" toolbar button: same files overlay, but it starts at the 4chan
+// base folder (root/4chan) so deleted/untracked threads are still reachable.
+async function openRootBrowser() {
+  $('browser-title').textContent = 'Browser';
+  openBrowserPage();
+  if (!(await browse('4chan'))) {
+    MARKED.clear();
+    await browse('');          // no 4chan folder (board_dir off) -> show root
+  }
+}
+
 async function browse(path) {
   try {
     const data = await api('/api/files?path=' + encodeURIComponent(path || ''));
@@ -367,7 +407,8 @@ async function browse(path) {
     MARKED.clear();               // marks never outlive the folder you made them in
     renderCrumbs(data.path, data.parent);
     renderFiles(data.entries);
-  } catch (e) { toast('Failed: ' + e.message, true); }
+    return true;
+  } catch (e) { toast('Failed: ' + e.message, true); return false; }
 }
 
 function setPreviewSize(size) {
@@ -445,6 +486,7 @@ function renderFiles(entries) {
   }
 
   applyGridSize(entries);
+  const fmt = (STATE.settings && STATE.settings.date_format) || 'iso';
   $('files').innerHTML = entries.map((f) => {
     const raw = '/api/files/raw?path=' + encodeURIComponent(f.path);
     let thumb = `<span>${esc(f.kind)}</span>`;
@@ -453,12 +495,16 @@ function renderFiles(entries) {
     const pick = f.dir ? '' :
       `<input type="checkbox" class="pick" data-pick="${esc(f.path)}"` +
       ` title="Mark for deletion"${marked ? ' checked' : ''}>`;
+    const date = f.mtime ? formatDate(f.mtime, fmt) : '';
+    const meta = f.dir
+      ? ('folder' + (date ? ' · ' + date : ''))
+      : (human(f.size) + (date ? ' · ' + date : ''));
     return `<div class="file ${f.dir ? 'dir' : ''}${marked ? ' marked' : ''}" data-path="${esc(f.path)}">
       ${pick}
       <div class="thumb">${thumb}</div>
       <div class="meta">
         <span class="name">${esc(f.name)}</span>
-        <span class="sz">${f.dir ? 'folder' : human(f.size)}</span>
+        <span class="sz">${meta}</span>
       </div>
     </div>`;
   }).join('');

@@ -9,6 +9,8 @@ is never re-downloaded on the next check.
 """
 from __future__ import annotations
 
+import time
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QSize, Qt, QTimer, QUrl
@@ -70,14 +72,44 @@ def human(n: float) -> str:
     return f"{n:.1f} GB"
 
 
+def format_ts(ts: float, fmt: str) -> str:
+    """Format an epoch timestamp for the file-browser meta line."""
+    if not ts:
+        return ""
+    dt = datetime.fromtimestamp(ts)
+    if fmt == "relative":
+        s = max(0, int(time.time() - ts))
+        if s < 60:
+            return "just now"
+        m = s // 60
+        if m < 60:
+            return f"{m}m ago"
+        h = m // 60
+        if h < 24:
+            return f"{h}h ago"
+        d = h // 24
+        if d < 30:
+            return f"{d}d ago"
+        mo = d // 30
+        if mo < 12:
+            return f"{mo}mo ago"
+        return f"{mo // 12}y ago"
+    if fmt == "us":
+        return dt.strftime("%m/%d/%Y %I:%M %p")
+    if fmt == "euro":
+        return dt.strftime("%d/%m/%Y %H:%M")
+    return dt.strftime("%Y-%m-%d %H:%M")   # iso
+
+
 class FileBrowser(QDialog):
     """One folder at a time; only files can be marked."""
 
     def __init__(self, root: str | Path, start: str = "", title: str = "",
-                 parent: QWidget | None = None):
+                 date_format: str = "iso", parent: QWidget | None = None):
         super().__init__(parent)
         self.root = Path(root).resolve()
         self.title = title or "Files"
+        self.date_format = date_format
         self.path = ""                       # relative to root
         self.marked: set[str] = set()
         self._pixmaps: dict[str, QPixmap] = {}
@@ -220,14 +252,19 @@ class FileBrowser(QDialog):
         for child in children:
             is_dir = child.is_dir()
             try:
-                size = 0 if is_dir else child.stat().st_size
+                st = child.stat()
+                size = 0 if is_dir else st.st_size
+                mtime = st.st_mtime
             except OSError:
                 continue
             rel = str(child.relative_to(self.root)).replace("\\", "/")
             names.append(child.name)
             if not is_dir:
                 self.file_rels.append(rel)
-            label = f"{child.name}\n{'folder' if is_dir else human(size)}"
+            date = format_ts(mtime, self.date_format)
+            meta = (f"folder · {date}" if is_dir else f"{human(size)} · {date}") if date \
+                else ("folder" if is_dir else human(size))
+            label = f"{child.name}\n{meta}"
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, rel)
             item.setData(Qt.UserRole + 1, is_dir)

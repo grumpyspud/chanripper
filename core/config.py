@@ -16,6 +16,7 @@ DELAY_WARN_BELOW = 10.0
 
 FOLDER_MODES = ("number", "name", "both")
 NAME_MODES = ("uploader", "number")
+DATE_FORMATS = ("iso", "us", "euro", "relative")
 
 
 def _home() -> Path:
@@ -59,6 +60,7 @@ class Settings:
     board_dir: bool = True
     folder_mode: str = "both"          # number | name | both
     name_mode: str = "uploader"        # uploader | number
+    date_format: str = "iso"           # iso | us | euro | relative
     default_delay: float = DELAY_DEFAULT
     default_comments: bool = False
     wayback_fallback: bool = False
@@ -71,6 +73,8 @@ class Settings:
             self.folder_mode = "both"
         if self.name_mode not in NAME_MODES:
             self.name_mode = "uploader"
+        if self.date_format not in DATE_FORMATS:
+            self.date_format = "iso"
         self.default_delay = clamp_delay(self.default_delay)
         self.max_workers = max(1, min(8, int(self.max_workers or 3)))
         self.media_workers = max(1, min(16, int(self.media_workers or 4)))

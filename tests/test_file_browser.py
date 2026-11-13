@@ -6,8 +6,10 @@ only requirements-test.txt) stays green.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -18,7 +20,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication, QMessageBox
-    from gui.file_browser import FileBrowser, FilePreview
+    from gui.file_browser import FileBrowser, FilePreview, format_ts
     HAVE_QT = True
 except Exception:                                   # pragma: no cover
     HAVE_QT = False
@@ -124,6 +126,23 @@ class TestFileBrowser(unittest.TestCase):
             self.assertGreaterEqual(p.scale, 0.25)
         finally:
             p.reject()
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class TestFormatTs(unittest.TestCase):
+    def test_iso_us_euro_shapes(self):
+        ts = 1700000000
+        self.assertRegex(format_ts(ts, "iso"), r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
+        self.assertRegex(format_ts(ts, "us"),
+                         r"^\d{2}/\d{2}/\d{4} \d{1,2}:\d{2} (AM|PM)$")
+        self.assertRegex(format_ts(ts, "euro"), r"^\d{2}/\d{2}/\d{4} \d{2}:\d{2}$")
+
+    def test_relative(self):
+        self.assertEqual(format_ts(time.time(), "relative"), "just now")
+        self.assertEqual(format_ts(time.time() - 7200, "relative"), "2h ago")
+
+    def test_missing_ts_returns_empty(self):
+        self.assertEqual(format_ts(0, "iso"), "")
 
 
 if __name__ == "__main__":

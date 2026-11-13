@@ -49,6 +49,15 @@ class SettingsDialog(QDialog):
         self.name_mode.setCurrentIndex(max(0, idx))
         form.addRow("Media files are saved as", self.name_mode)
 
+        self.date_format = QComboBox()
+        self.date_format.addItem("ISO (2026-11-13 14:30)", "iso")
+        self.date_format.addItem("US (11/13/2026 2:30 PM)", "us")
+        self.date_format.addItem("European (13/11/2026 14:30)", "euro")
+        self.date_format.addItem("Relative (3h ago)", "relative")
+        idx = self.date_format.findData(settings.date_format)
+        self.date_format.setCurrentIndex(max(0, idx))
+        form.addRow("Date/time format", self.date_format)
+
         hint = QLabel(
             "Uploader mode saves the original name (e.g. <b>file.png</b>). "
             "If two uploads share a name, the second becomes "
@@ -127,6 +136,7 @@ class SettingsDialog(QDialog):
         s.board_dir = self.board_dir.isChecked()
         s.folder_mode = self.folder_mode.currentData()
         s.name_mode = self.name_mode.currentData()
+        s.date_format = self.date_format.currentData()
         s.default_delay = clamp_delay(self.default_delay.value())
         s.default_comments = self.default_comments.isChecked()
         s.max_workers = self.workers.value()
