@@ -12,15 +12,15 @@ services:
       # you will not be able to move or delete them from Windows.
       PUID: 1000
       PGID: 1000
-      TZ: America/Chicago
+      TZ: UTC
       CHANRIPPER_PORT: 4848
     volumes:
       # Settings + the dedupe ledger. Keep this on LOCAL storage (a NAS volume
       # or a named docker volume) — SQLite over an SMB/CIFS mount corrupts
       # under concurrent locking.
       - ./config:/config
-      # Where the media actually goes. This is the one that should be the share.
-      - /volume1/4chan:/downloads
+      # Where the media actually goes. Point this at your download directory.
+      - /path/to/downloads:/downloads
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4848/healthz || exit 1"]
       interval: 30s
